@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "CastVoice"
+version = "1.0.0"
+id = "artifacts/castvoice"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 20770
+
+[services.development]
+run = "pnpm --filter @workspace/castvoice run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/castvoice", "run", "build" ]
+publicDir = "artifacts/castvoice/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "20770"
+BASE_PATH = "/"
