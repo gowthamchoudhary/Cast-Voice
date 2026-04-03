@@ -1,0 +1,247 @@
+Build a full-stack web app called "CastVoice" — a story-to-audio-drama engine where users cast characters with real or AI-generated voices and get a fully produced audio drama with sound effects and emotional delivery.
+
+=== TECH STACK ===
+- Frontend: React + Vite + TypeScript
+- Styling: Tailwind CSS
+- Animations: Framer Motion
+- Backend: Node.js + Express
+- Database: Replit DB (built-in)
+- Auth: Replit Auth (built-in)
+- APIs: ElevenLabs (Voice Design, Voice Cloning, TTS, Sound Effects), Pollinations.ai (free image generation, no key needed)
+
+=== DESIGN DIRECTION ===
+Dark cinematic theme. Think film production studio meets audio drama. Color palette: deep black (#0a0a0a) background, warm gold (#f5a623) as primary accent, off-white (#f0ece4) for text. Font pairing: "Playfair Display" for headings (dramatic, editorial), "DM Sans" for body (clean, readable). Every page should feel like entering a recording studio. Grain texture overlay on backgrounds. Subtle glowing effects on interactive elements. No purple gradients. No generic AI aesthetics.
+
+=== APP PAGES & FLOW ===
+
+--- PAGE 1: AUTH ---
+Simple centered login screen.
+- App name "CastVoice" in large Playfair Display
+- Tagline: "Your story. Every voice."
+- "Sign in with Replit" button
+- Cinematic background: dark with subtle audio waveform animation in gold
+
+--- PAGE 2: DASHBOARD ---
+After login, show:
+- Top nav: CastVoice logo left, user avatar + name right, settings icon
+- Hero section: "Start a New Story" — large CTA button in gold
+- "My Stories" grid below: cards showing past story projects with title, character count, status (generating / ready / draft)
+- Each card has: Play button, Edit button, Delete button
+- Empty state: illustrated prompt to create first story
+
+--- PAGE 3: VOICE PROFILE SETTINGS ---
+Accessible from nav settings icon. This is where users set up their personal voice ONCE, reused across all stories.
+
+Form fields:
+- Display Name
+- Role: dropdown → Hero / Villain / Side Character
+- Group: dropdown + custom input → Friends / Family / (type your own)
+- Voice Setup section:
+  - Option A: "Upload Voice Sample" — accepts .mp3 or .wav, max 2 minutes
+  - Option B: "Record Live" — in-browser recording with waveform visualizer, start/stop controls
+  - After upload or record: show audio player to preview
+  - Button: "Save Voice Profile" → sends audio to ElevenLabs Voice Cloning API, stores clone_id in DB against user
+
+--- PAGE 4: STORY SELECTION ---
+Three tabs at top:
+
+TAB 1 — "Featured Stories" (5 pre-loaded):
+Show as large cinematic cards with genre-appropriate background images from Pollinations.ai. Each card:
+- Story title
+- Genre tag (Thriller / Fantasy / Horror / Sci-Fi / Comedy)
+- Character count
+- "Cast This Story" button
+
+Pre-load these 5 stories in the database with full scripts:
+
+STORY 1: THE MIDNIGHT HEIST
+Characters: The Mastermind, The Hacker, The Muscle, The Insider, The Guard
+Genre: Thriller
+Scene image prompt: "dark museum at midnight, glass cases glowing with blue light, a single diamond on a pedestal, security lasers, cinematic shadows"
+
+STORY 2: THE LOST KINGDOM  
+Characters: The Hero, The Loyal Friend, The Wise Mentor, The Dark Villain, The Creature Companion
+Genre: Fantasy
+Scene image prompt: "ancient ruined kingdom at sunset, golden light through broken stone arches, a glowing sword in the ground, mystical fog, epic fantasy landscape"
+
+STORY 3: THE HAUNTED HOUSE ON WILLOW STREET
+Characters: The Skeptic, The Scared One, The Curious Explorer, The Voice in the Dark, Narrator
+Genre: Horror
+Scene image prompt: "abandoned Victorian house at night, broken windows glowing faintly, dead trees, fog on the ground, single flickering light inside, moonless sky"
+
+STORY 4: THE SPACE MISSION — LAST SIGNAL
+Characters: The Captain, The AI Assistant, The Engineer, The Scientist, The Unknown Entity
+Genre: Sci-Fi
+Scene image prompt: "deep space, a lone spaceship against a vast nebula, emergency red lighting inside cockpit, floating debris, distant unknown planet glowing faintly"
+
+STORY 5: THE PERFECT DAY GONE WRONG
+Characters: The Planner, The Late Friend, The Overreactor, The Chill One, The Random Stranger
+Genre: Comedy
+Scene image prompt: "chaotic sunny city street, spilled coffee on someone's shirt, pigeons everywhere, a wonky banner that says PERFECT DAY, bright warm colors"
+
+TAB 2 — "Paste a Link":
+- Text input: "Paste a URL to any story or article"
+- Button: Fetch Story
+- Backend fetches the URL content, extracts the text, parses it for characters using a simple heuristic (look for dialogue patterns and repeated names)
+- Shows extracted character list for user to confirm
+
+TAB 3 — "Upload Text":
+- Textarea: paste raw story text
+- Or file upload: .txt or .pdf
+- Same parsing flow as above
+
+--- PAGE 5: CAST ASSIGNMENT ---
+This is the most important page. Show it after a story is selected.
+
+Layout: two-column on desktop, single column on mobile.
+
+LEFT COLUMN:
+- Story title and genre
+- Scene background image from Pollinations.ai (fetched fresh per story)
+- Brief story synopsis (2 sentences)
+
+RIGHT COLUMN — Character casting cards, one per character:
+Each card shows:
+- Character name (bold)
+- Character role description (e.g. "calm, strategic mastermind")
+- Three casting options as radio buttons or tabs:
+
+  OPTION A — "Use My Voice"
+  Only available if user has saved a voice profile
+  Shows user's avatar and name
+  Uses their stored ElevenLabs clone_id
+
+  OPTION B — "Design a Voice"
+  Text input: "Describe this voice..." with placeholder examples like "raspy, tired detective, 50s, gruff but kind"
+  OR quick preset chips to click: [Deep] [Warm] [Young] [Robotic] [Ethereal] [Commanding] [Nervous] [Playful]
+  Chips are additive — clicking multiple adds to description
+  ElevenLabs Voice Design API generates this voice on demand
+
+  OPTION C — "Invite Someone"
+  Button: "Send Invite Link"
+  Generates a unique UUID link: /join/{storyId}/{characterId}
+  Copy link button + share text pre-written
+  Shows "Waiting for {Character Name}..." with a spinner once link is sent
+  If not filled after user hits Generate, auto-falls back to Voice Design
+
+Bottom of page: "Generate Audio Drama" button — gold, large, full width
+Only active when all characters have at least one option selected
+
+--- PAGE 6: GENERATION SCREEN ---
+Full screen cinematic loading experience. Do NOT use a plain spinner.
+
+Show:
+- Story title at top
+- Scene background image (blurred, atmospheric)
+- Progress steps with animated indicators:
+  Step 1: "Designing character voices..." 
+  Step 2: "Writing emotional delivery for each line..."
+  Step 3: "Generating dialogue..."
+  Step 4: "Adding sound effects..."
+  Step 5: "Mixing the final drama..."
+- Each step lights up gold as it completes
+- Estimated time: "This takes 3-5 minutes. Worth it."
+- Ambient audio waveform animation underneath
+
+Backend generation flow (run sequentially):
+1. For each character with Voice Design option: call ElevenLabs Voice Design API with the description text
+2. For each character with Voice Clone option: use stored clone_id
+3. For each line of dialogue in the script:
+   - Determine emotion tag from script data
+   - Call ElevenLabs TTS API with voice_id + text + emotion context in the voice settings
+   - Use ElevenLabs voice settings: stability, similarity_boost, style tuned per emotion
+4. For each SFX cue in the script: call ElevenLabs Sound Effects API with the cue description
+5. Mix all audio files in sequence using Node.js (use fluent-ffmpeg or similar)
+6. Generate scene image for each scene via Pollinations.ai API: fetch("https://image.pollinations.ai/prompt/{encoded_prompt}?width=1280&height=720&nologo=true")
+7. Store final mixed audio file and scene images, update story status to "ready"
+
+--- PAGE 7: PLAYBACK PAGE ---
+Cinematic audio drama player.
+
+Layout:
+- Full screen background: current scene image, blurred edges, dark vignette overlay
+- Scene images crossfade as story progresses
+- Center: large play/pause button
+- Below: audio waveform progress bar (custom styled, gold)
+- Character dialogue display: show current speaker name + line text as subtitles
+- Character portraits row at bottom: small avatars, highlight the currently speaking character
+- Download button: "Download Audio Drama" — downloads the final mixed .mp3
+- Share button: generates a shareable link to this playback page
+
+=== INVITE JOIN PAGE ===
+Route: /join/{storyId}/{characterId}
+
+Show:
+- "You've been invited to voice [Character Name] in [Story Title]"
+- Character description
+- Record button: live browser recording
+- Preview playback
+- Submit button → sends audio to ElevenLabs Voice Cloning, stores clone_id, marks character as filled
+- Success screen: "Your voice has been added. Listen to the drama when it's ready."
+
+=== DATABASE SCHEMA ===
+Users table: id, replit_user_id, display_name, role, group, voice_clone_id, created_at
+Stories table: id, title, genre, script_json, scene_image_prompts_json, status, created_at
+Projects table: id, user_id, story_id, cast_json, final_audio_url, scene_images_json, status, created_at
+InviteLinks table: id, project_id, character_id, uuid, filled_by_user_id, voice_clone_id, created_at
+
+=== ENVIRONMENT VARIABLES NEEDED ===
+ELEVENLABS_API_KEY=
+(Pollinations.ai needs no key)
+
+=== ELEVENLABS API CALLS ===
+
+Voice Design:
+POST https://api.elevenlabs.io/v1/voice-generation/generate-voice
+Body: { "text": "voice description", "gender": "auto", "age": "auto", "accent": "auto" }
+
+Voice Cloning:
+POST https://api.elevenlabs.io/v1/voices/add
+Form data: name, files (audio), description
+
+TTS with emotion:
+POST https://api.elevenlabs.io/v1/text-to-speech/{voice_id}
+Body: { "text": "dialogue line", "model_id": "eleven_multilingual_v2", "voice_settings": { "stability": 0.3, "similarity_boost": 0.8, "style": 0.7, "use_speaker_boost": true } }
+Adjust stability per emotion: panic = 0.1, calm = 0.7, sad = 0.5, excited = 0.2
+
+Sound Effects:
+POST https://api.elevenlabs.io/v1/sound-generation
+Body: { "text": "SFX description from script", "duration_seconds": 3, "prompt_influence": 0.3 }
+
+=== SCRIPT DATA (store this in DB as seed data) ===
+
+Each story script is a JSON array of lines:
+{
+  "scene": 1,
+  "scene_description": "dark museum at midnight",
+  "sfx_before": "low ambient hum, distant city traffic",
+  "lines": [
+    {
+      "character": "The Mastermind",
+      "emotion": "calm, controlled, authoritative",
+      "stability": 0.7,
+      "text": "Listen carefully. We have exactly four minutes from the moment the power cuts. Not five. Four."
+    },
+    {
+      "character": "The Hacker", 
+      "emotion": "nervous energy, fast, slightly cocky",
+      "stability": 0.2,
+      "text": "Four minutes is plenty. I've bypassed systems three times harder than this in my sleep. Literally. I dreamed about it once."
+    }
+  ]
+}
+
+Store complete scripts for all 5 stories using the full dialogue from the project documents.
+
+=== KEY UX RULES ===
+- Mobile responsive everywhere
+- Loading states on every async action
+- Never show a blank screen — always show something atmospheric
+- Error states with friendly messages, never raw errors
+- All buttons have hover animations
+- Transitions between pages use Framer Motion slide or fade
+
+=== WHAT SUCCESS LOOKS LIKE ===
+A user opens the app, picks "The Haunted House on Willow Street", assigns Voice Design descriptions to each character (e.g. "terrified teenage girl, high pitched" for The Scared One), hits Generate, waits 4 minutes, then hears a fully produced horror audio drama with different voices, sound effects, emotional delivery, and scene images fading in the background. They hit download and send it to their friends.
+
+Build this completely. Start with the database schema and seed data, then backend API routes, then frontend pages in order. Make it production quality.
