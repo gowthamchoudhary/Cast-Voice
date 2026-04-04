@@ -53,10 +53,12 @@ type Voice = {
 
 type Project = {
   id: number;
-  title: string;
+  storyTitle: string;
+  storyGenre: string;
   status: string;
-  castingData?: { voices?: Record<string, Voice> };
+  castJson?: { voices?: Record<string, Voice> };
   story?: {
+    id: number;
     title: string;
     genre: string;
     synopsis: string;
@@ -104,8 +106,8 @@ export default function Cast({ projectId }: { projectId: string }) {
 
   // Load casting assignments from project data when it loads
   useEffect(() => {
-    if (project?.castingData?.voices && Object.keys(castAssignments).length === 0) {
-      setCastAssignments(project.castingData.voices as Record<string, Voice>);
+    if (project?.castJson?.voices && Object.keys(castAssignments).length === 0) {
+      setCastAssignments(project.castJson.voices as Record<string, Voice>);
     }
   }, [project]);
 
@@ -141,8 +143,8 @@ export default function Cast({ projectId }: { projectId: string }) {
           elevenLabsVoiceId: previewVoice?.voice_id,
         },
       };
-      const r = await api.put(`/api/projects/${projectId}`, {
-        castingData: { voices: updated },
+      const r = await api.patch(`/api/projects/${projectId}`, {
+        castJson: { voices: updated },
       });
       if (!r.ok) throw new Error(await r.text());
       return updated;
@@ -192,7 +194,7 @@ export default function Cast({ projectId }: { projectId: string }) {
         },
       };
       setCastAssignments(updated);
-      api.put(`/api/projects/${projectId}`, { castingData: { voices: updated } });
+      api.patch(`/api/projects/${projectId}`, { castJson: { voices: updated } });
       setActiveChar(null);
     },
     onError: (e: Error) => {
@@ -241,11 +243,11 @@ export default function Cast({ projectId }: { projectId: string }) {
           )}
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-3 mb-1">
-              <Badge variant="secondary">{project?.story?.genre}</Badge>
+              <Badge variant="secondary">{project?.story?.genre ?? project?.storyGenre}</Badge>
               <span className="text-muted-foreground text-sm">{castCount}/{characters.length} cast</span>
             </div>
-            <h1 className="font-serif text-2xl font-bold text-foreground">{project?.title}</h1>
-            <p className="text-muted-foreground text-sm mt-1 line-clamp-2">{project?.story?.synopsis}</p>
+            <h1 className="font-serif text-2xl font-bold text-foreground">{project?.story?.title ?? project?.storyTitle}</h1>
+            <p className="text-muted-foreground text-sm mt-1 line-clamp-2">{project?.story?.synopsis ?? "Cast each character with a voice to generate your audio drama."}</p>
           </div>
           <Button
             className="shrink-0 glow-primary"
@@ -417,7 +419,7 @@ export default function Cast({ projectId }: { projectId: string }) {
                       ...castAssignments,
                       [activeChar.id]: { characterId: activeChar.id, voiceType: "user_clone" as const },
                     };
-                    await api.put(`/api/projects/${projectId}`, { castingData: { voices: updated } });
+                    await api.patch(`/api/projects/${projectId}`, { castJson: { voices: updated } });
                     setCastAssignments(updated);
                     toast({ title: "Voice saved!", description: `Your voice assigned to ${activeChar.name}` });
                     setActiveChar(null);

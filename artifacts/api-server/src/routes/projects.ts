@@ -124,10 +124,66 @@ router.get("/projects/:id", async (req: Request, res: Response): Promise<void> =
     return;
   }
 
-  res.json(project);
+  // Join story data so the cast/generate pages have characters, synopsis, sceneImageUrl
+  const [story] = await db
+    .select()
+    .from(storiesTable)
+    .where(eq(storiesTable.id, project.storyId));
+
+  res.json({
+    ...project,
+    story: story
+      ? {
+          id: story.id,
+          title: story.title,
+          genre: story.genre,
+          synopsis: story.synopsis,
+          characters: story.characters,
+          sceneImageUrl: story.sceneImageUrl,
+          scriptJson: story.scriptJson,
+        }
+      : null,
+  });
 });
 
 router.patch("/projects/:id", async (req: Request, res: Response): Promise<void> => {
+  if (!req.isAuthenticated()) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  const params = UpdateProjectParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+
+  const body = UpdateProjectBody.safeParse(req.body);
+  if (!body.success) {
+    res.status(400).json({ error: body.error.message });
+    return;
+  }
+
+  const updateData: Record<string, unknown> = { updatedAt: new Date() };
+  if (body.data.castJson !== undefined) updateData.castJson = body.data.castJson;
+  if (body.data.status !== undefined) updateData.status = body.data.status;
+
+  const [project] = await db
+    .update(projectsTable)
+    .set(updateData)
+    .where(eq(projectsTable.id, params.data.id))
+    .returning();
+
+  if (!project) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+
+  res.json(project);
+});
+
+// PUT alias so clients using PUT also work
+router.put("/projects/:id", async (req: Request, res: Response): Promise<void> => {
   if (!req.isAuthenticated()) {
     res.status(401).json({ error: "Unauthorized" });
     return;

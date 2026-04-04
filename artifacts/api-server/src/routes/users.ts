@@ -1,7 +1,7 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { eq } from "drizzle-orm";
 import { db, userProfilesTable } from "@workspace/db";
-import { GetUserProfileResponse, UpdateUserProfileBody, UpdateUserProfileResponse, CloneUserVoiceBody, CloneUserVoiceResponse } from "@workspace/api-zod";
+import { GetUserProfileResponse, UpdateUserProfileBody, UpdateUserProfileResponse, CloneUserVoiceResponse } from "@workspace/api-zod";
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
@@ -59,15 +59,17 @@ router.put("/users/profile", async (req: Request, res: Response): Promise<void> 
   res.json(UpdateUserProfileResponse.parse(profile));
 });
 
-router.post("/users/voice", async (req: Request, res: Response): Promise<void> => {
+// Accepts multipart form data with "samples" files (from file picker or live recording)
+// Frontend converts files to base64 data URLs and sends JSON: { samples: string[], displayName: string }
+router.post("/users/voice-clone", async (req: Request, res: Response): Promise<void> => {
   if (!req.isAuthenticated()) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }
 
-  const parsed = CloneUserVoiceBody.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+  const { samples, displayName } = req.body as { samples?: string[]; displayName?: string };
+  if (!samples || !Array.isArray(samples) || samples.length === 0) {
+    res.status(400).json({ error: "At least one voice sample is required" });
     return;
   }
 
@@ -78,21 +80,31 @@ router.post("/users/voice", async (req: Request, res: Response): Promise<void> =
   }
 
   try {
-    // Convert data URL to Buffer
-    const dataUrl = parsed.data.audioDataUrl;
-    const base64Data = dataUrl.split(",")[1];
-    if (!base64Data) {
-      res.status(400).json({ error: "Invalid audio data URL" });
-      return;
-    }
+    // Get user's display name for the voice label
+    const [profile] = await db
+      .select()
+      .from(userProfilesTable)
+      .where(eq(userProfilesTable.replitUserId, req.user.id));
 
-    const audioBuffer = Buffer.from(base64Data, "base64");
-    const blob = new Blob([audioBuffer], { type: "audio/wav" });
+    const voiceName = displayName || profile?.displayName || req.user.id;
 
     const formData = new FormData();
-    formData.append("name", parsed.data.displayName);
-    formData.append("description", `Voice profile for ${parsed.data.displayName}`);
-    formData.append("files", blob, parsed.data.fileName);
+    formData.append("name", voiceName);
+    formData.append("description", `Voice profile for ${voiceName}`);
+
+    // Convert each base64 data URL to a blob and attach
+    for (let i = 0; i < samples.length; i++) {
+      const dataUrl = samples[i];
+      const commaIdx = dataUrl.indexOf(",");
+      if (commaIdx === -1) continue;
+      const mimeMatch = dataUrl.match(/data:([^;]+);base64/);
+      const mimeType = mimeMatch?.[1] ?? "audio/webm";
+      const ext = mimeType.includes("mp3") ? "mp3" : mimeType.includes("wav") ? "wav" : "webm";
+      const base64Data = dataUrl.slice(commaIdx + 1);
+      const audioBuffer = Buffer.from(base64Data, "base64");
+      const blob = new Blob([audioBuffer], { type: mimeType });
+      formData.append("files", blob, `sample_${i + 1}.${ext}`);
+    }
 
     const response = await fetch("https://api.elevenlabs.io/v1/voices/add", {
       method: "POST",
@@ -103,18 +115,24 @@ router.post("/users/voice", async (req: Request, res: Response): Promise<void> =
     if (!response.ok) {
       const errText = await response.text();
       req.log.error({ status: response.status, errText }, "ElevenLabs voice clone failed");
-      res.status(500).json({ error: "Voice cloning failed" });
+      res.status(500).json({ error: "Voice cloning failed: " + errText });
       return;
     }
 
     const data = await response.json() as { voice_id: string };
     const voiceCloneId = data.voice_id;
 
-    // Update user profile with voice clone ID
-    await db
-      .update(userProfilesTable)
-      .set({ voiceCloneId, updatedAt: new Date() })
-      .where(eq(userProfilesTable.replitUserId, req.user.id));
+    // Upsert profile with voice clone ID
+    if (profile) {
+      await db
+        .update(userProfilesTable)
+        .set({ voiceCloneId, updatedAt: new Date() })
+        .where(eq(userProfilesTable.replitUserId, req.user.id));
+    } else {
+      await db
+        .insert(userProfilesTable)
+        .values({ replitUserId: req.user.id, displayName: voiceName, voiceCloneId });
+    }
 
     res.json(CloneUserVoiceResponse.parse({ voiceCloneId }));
   } catch (err) {

@@ -26,6 +26,16 @@ export function useApi() {
     });
   }
 
+  function patch(path: string, body?: unknown) {
+    const url = path.startsWith("/api/") ? `${BASE_URL}${path}` : path;
+    return fetch(url, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: body != null ? JSON.stringify(body) : undefined,
+    });
+  }
+
   function del(path: string) {
     const url = path.startsWith("/api/") ? `${BASE_URL}${path}` : path;
     return fetch(url, {
@@ -34,5 +44,5 @@ export function useApi() {
     });
   }
 
-  return { get, post, put, del };
+  return { get, post, put, patch, del };
 }

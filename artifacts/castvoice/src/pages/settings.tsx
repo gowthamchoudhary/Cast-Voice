@@ -78,12 +78,22 @@ export default function Settings() {
   const cloneVoice = useMutation({
     mutationFn: async (files: File[]) => {
       if (files.length === 0) throw new Error("Please provide at least one voice sample.");
-      const formData = new FormData();
-      files.forEach((f) => formData.append("samples", f));
+
+      // Convert each file/blob to a base64 data URL so we can send as JSON
+      const toDataUrl = (file: File | Blob): Promise<string> =>
+        new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+
+      const samples = await Promise.all(files.map((f) => toDataUrl(f)));
       const BASE_URL = import.meta.env.BASE_URL.replace(/\/$/, "");
       const r = await fetch(`${BASE_URL}/api/users/voice-clone`, {
         method: "POST",
-        body: formData,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ samples }),
         credentials: "include",
       });
       if (!r.ok) throw new Error(await r.text());
