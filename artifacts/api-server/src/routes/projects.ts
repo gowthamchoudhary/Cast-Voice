@@ -47,7 +47,10 @@ router.post("/projects", async (req: Request, res: Response): Promise<void> => {
     return;
   }
 
-  const parsed = CreateProjectBody.safeParse(req.body);
+  const parsed = CreateProjectBody.safeParse({
+    castJson: {},
+    ...req.body,
+  });
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
     return;

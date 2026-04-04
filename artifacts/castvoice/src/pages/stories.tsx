@@ -62,7 +62,7 @@ export default function Stories() {
 
   const createProject = useMutation({
     mutationFn: async ({ storyId, title }: { storyId: number; title: string }) => {
-      const r = await api.post("/api/projects", { storyId, title });
+      const r = await api.post("/api/projects", { storyId, title, castJson: {} });
       if (!r.ok) throw new Error(await r.text());
       return r.json();
     },
