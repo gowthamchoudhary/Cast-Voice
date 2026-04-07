@@ -58,11 +58,28 @@ export const inviteLinksTable = pgTable("invite_links", {
   projectId: integer("project_id").notNull(),
   characterId: text("character_id").notNull(),
   uuid: text("uuid").notNull().unique(),
+  inviterProfileId: integer("inviter_profile_id"),
   filledByUserId: integer("filled_by_user_id"),
   voiceCloneId: text("voice_clone_id"),
+  filledByName: text("filled_by_name"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 export const insertInviteLinkSchema = createInsertSchema(inviteLinksTable).omit({ id: true, createdAt: true });
 export type InsertInviteLink = z.infer<typeof insertInviteLinkSchema>;
 export type InviteLink = typeof inviteLinksTable.$inferSelect;
+
+export const voiceLibraryTable = pgTable("voice_library", {
+  id: serial("id").primaryKey(),
+  ownerUserId: integer("owner_user_id").notNull(),
+  personName: text("person_name").notNull(),
+  role: text("role"),
+  group: text("group"),
+  elevenLabsVoiceId: text("elevenlabs_voice_id").notNull(),
+  inviteUuid: text("invite_uuid"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const insertVoiceLibrarySchema = createInsertSchema(voiceLibraryTable).omit({ id: true, createdAt: true });
+export type InsertVoiceLibrary = z.infer<typeof insertVoiceLibrarySchema>;
+export type VoiceLibraryEntry = typeof voiceLibraryTable.$inferSelect;

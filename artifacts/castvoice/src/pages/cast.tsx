@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
@@ -17,7 +17,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 
 function Nav() {
   const [, setLocation] = useLocation();
@@ -43,12 +42,15 @@ type Character = {
   description: string;
 };
 
+type VoiceType = "ai_designed" | "user_clone" | "invite" | "library";
+
 type Voice = {
   characterId: string;
-  voiceType: "ai_designed" | "user_clone" | "invite";
+  voiceType: VoiceType;
   elevenLabsVoiceId?: string;
   inviteName?: string;
   inviteEmail?: string;
+  personName?: string;
 };
 
 type Project = {
@@ -76,10 +78,84 @@ type VoiceDesign = {
   style: string;
 };
 
+type VoiceLibraryEntry = {
+  id: number;
+  personName: string;
+  role: string | null;
+  group: string | null;
+  elevenLabsVoiceId: string;
+};
+
 const GENDERS = ["male", "female", "neutral"];
 const AGES = ["young", "middle_aged", "old"];
 const ACCENTS = ["american", "british", "australian", "indian", "african", "neutral"];
 const STYLES = ["narrative", "news", "conversational", "gruff", "warm", "mysterious", "cheerful"];
+
+function LibraryVoiceCard({
+  entry,
+  onSelect,
+}: {
+  entry: VoiceLibraryEntry;
+  onSelect: (entry: VoiceLibraryEntry) => void;
+}) {
+  const [playing, setPlaying] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const BASE_URL = import.meta.env.BASE_URL.replace(/\/$/, "");
+
+  const playPreview = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (playing && audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+      setPlaying(false);
+      return;
+    }
+    setLoading(true);
+    try {
+      const audio = new Audio(`${BASE_URL}/api/voices/${entry.elevenLabsVoiceId}/sample`);
+      audioRef.current = audio;
+      audio.onended = () => { setPlaying(false); audioRef.current = null; };
+      audio.onerror = () => { setPlaying(false); setLoading(false); };
+      await audio.play();
+      setPlaying(true);
+    } catch {
+      setPlaying(false);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const initials = entry.personName.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
+
+  return (
+    <div
+      onClick={() => onSelect(entry)}
+      className="bg-card border border-border rounded-xl p-3 cursor-pointer hover:border-primary/40 transition-all group"
+    >
+      <div className="flex items-center gap-3">
+        <div className="w-9 h-9 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center text-primary font-serif font-bold text-xs shrink-0 group-hover:border-primary/50">
+          {initials}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="font-medium text-foreground text-sm truncate">{entry.personName}</p>
+          {(entry.role || entry.group) && (
+            <p className="text-xs text-muted-foreground truncate">
+              {[entry.role, entry.group].filter(Boolean).join(" · ")}
+            </p>
+          )}
+        </div>
+        <button
+          onClick={playPreview}
+          disabled={loading}
+          className="w-7 h-7 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center text-primary hover:bg-primary/20 transition-colors disabled:opacity-50 shrink-0"
+        >
+          {loading ? <Spinner className="w-3 h-3" /> : playing ? <span className="text-xs">⏹</span> : <span className="text-xs">▶</span>}
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export default function Cast({ projectId }: { projectId: string }) {
   const [, setLocation] = useLocation();
@@ -88,7 +164,7 @@ export default function Cast({ projectId }: { projectId: string }) {
   const queryClient = useQueryClient();
 
   const [activeChar, setActiveChar] = useState<Character | null>(null);
-  const [voiceType, setVoiceType] = useState<"ai_designed" | "user_clone" | "invite">("ai_designed");
+  const [voiceType, setVoiceType] = useState<VoiceType>("ai_designed");
   const [gender, setGender] = useState("female");
   const [age, setAge] = useState("middle_aged");
   const [accent, setAccent] = useState("american");
@@ -104,7 +180,11 @@ export default function Cast({ projectId }: { projectId: string }) {
     queryFn: () => api.get(`/api/projects/${projectId}`).then((r) => r.json()),
   });
 
-  // Load casting assignments from project data when it loads
+  const { data: voiceLibrary } = useQuery<VoiceLibraryEntry[]>({
+    queryKey: ["/api/users/voice-library"],
+    queryFn: () => api.get("/api/users/voice-library").then((r) => r.json()),
+  });
+
   useEffect(() => {
     if (project?.castJson?.voices && Object.keys(castAssignments).length === 0) {
       setCastAssignments(project.castJson.voices as Record<string, Voice>);
@@ -114,19 +194,14 @@ export default function Cast({ projectId }: { projectId: string }) {
   const designVoice = useMutation({
     mutationFn: async () => {
       const r = await api.post("/api/voices/design", {
-        gender,
-        age,
-        accent,
-        style,
+        gender, age, accent, style,
         description: activeChar?.description,
         characterName: activeChar?.name,
       });
       if (!r.ok) throw new Error(await r.text());
       return r.json() as Promise<VoiceDesign>;
     },
-    onSuccess: (voice) => {
-      setPreviewVoice(voice);
-    },
+    onSuccess: (voice) => setPreviewVoice(voice),
     onError: (e: Error) => {
       toast({ title: "Error designing voice", description: e.message, variant: "destructive" });
     },
@@ -143,9 +218,7 @@ export default function Cast({ projectId }: { projectId: string }) {
           elevenLabsVoiceId: previewVoice?.voice_id,
         },
       };
-      const r = await api.patch(`/api/projects/${projectId}`, {
-        castJson: { voices: updated },
-      });
+      const r = await api.patch(`/api/projects/${projectId}`, { castJson: { voices: updated } });
       if (!r.ok) throw new Error(await r.text());
       return updated;
     },
@@ -180,10 +253,14 @@ export default function Cast({ projectId }: { projectId: string }) {
       return r.json();
     },
     onSuccess: (invite) => {
+      const inviteUrl = `${window.location.origin}/join/${invite.uuid}`;
       toast({
-        title: "Invite created!",
-        description: `Share this link: ${window.location.origin}/join/${invite.uuid}`,
+        title: "Invite link created!",
+        description: `Share: ${inviteUrl}`,
       });
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(inviteUrl).catch(() => {});
+      }
       const updated = {
         ...castAssignments,
         [activeChar!.id]: {
@@ -202,15 +279,31 @@ export default function Cast({ projectId }: { projectId: string }) {
     },
   });
 
+  const assignFromLibrary = async (entry: VoiceLibraryEntry) => {
+    if (!activeChar) return;
+    const updated = {
+      ...castAssignments,
+      [activeChar.id]: {
+        characterId: activeChar.id,
+        voiceType: "library" as const,
+        elevenLabsVoiceId: entry.elevenLabsVoiceId,
+        personName: entry.personName,
+      },
+    };
+    await api.patch(`/api/projects/${projectId}`, { castJson: { voices: updated } });
+    setCastAssignments(updated);
+    queryClient.invalidateQueries({ queryKey: [`/api/projects/${projectId}`] });
+    toast({ title: "Voice assigned!", description: `${entry.personName}'s voice assigned to ${activeChar.name}` });
+    setActiveChar(null);
+  };
+
   const startGeneration = useMutation({
     mutationFn: async () => {
       const r = await api.post(`/api/projects/${projectId}/generate`, {});
       if (!r.ok) throw new Error(await r.text());
       return r.json();
     },
-    onSuccess: () => {
-      setLocation(`/generate/${projectId}`);
-    },
+    onSuccess: () => setLocation(`/generate/${projectId}`),
     onError: (e: Error) => {
       toast({ title: "Error starting generation", description: e.message, variant: "destructive" });
     },
@@ -227,12 +320,20 @@ export default function Cast({ projectId }: { projectId: string }) {
   const characters = project?.story?.characters || [];
   const castCount = Object.keys(castAssignments).length;
   const allCast = castCount >= characters.length && characters.length > 0;
+  const library = voiceLibrary || [];
+  const libraryGroups = Array.from(new Set(library.map(e => e.group || "Other"))).sort();
+
+  const getVoiceLabel = (v: Voice) => {
+    if (v.voiceType === "ai_designed") return "AI Voice";
+    if (v.voiceType === "invite") return `Invited: ${v.inviteName || "Friend"}`;
+    if (v.voiceType === "library") return v.personName || "Library";
+    return "My Voice";
+  };
 
   return (
     <div className="min-h-screen bg-background">
       <Nav />
       <main className="max-w-6xl mx-auto px-6 py-10">
-        {/* Story header */}
         <div className="flex items-start gap-6 mb-10">
           {project?.story?.sceneImageUrl && (
             <img
@@ -259,10 +360,9 @@ export default function Cast({ projectId }: { projectId: string }) {
           </Button>
         </div>
 
-        {/* Characters grid */}
         <div className="mb-4">
           <h2 className="font-serif text-xl font-semibold text-foreground mb-1">Cast Characters</h2>
-          <p className="text-muted-foreground text-sm mb-6">Assign a voice to each character. Use AI voices, your own voice, or invite friends.</p>
+          <p className="text-muted-foreground text-sm mb-6">Assign a voice to each character. Use AI voices, your own voice, invite friends, or pick from your Voice Library.</p>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -290,7 +390,7 @@ export default function Cast({ projectId }: { projectId: string }) {
                   </div>
                   {assigned && (
                     <Badge variant="outline" className="text-xs border-primary/40 text-primary">
-                      {assigned.voiceType === "ai_designed" ? "AI Voice" : assigned.voiceType === "invite" ? "Invited" : "My Voice"}
+                      {getVoiceLabel(assigned)}
                     </Badge>
                   )}
                 </div>
@@ -308,8 +408,8 @@ export default function Cast({ projectId }: { projectId: string }) {
       </main>
 
       {/* Cast Dialog */}
-      <Dialog open={!!activeChar} onOpenChange={(open) => !open && (setActiveChar(null), setPreviewVoice(null))}>
-        <DialogContent className="max-w-md">
+      <Dialog open={!!activeChar} onOpenChange={(open) => { if (!open) { setActiveChar(null); setPreviewVoice(null); } }}>
+        <DialogContent className="max-w-md max-h-[80vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-serif text-lg">{activeChar?.name}</DialogTitle>
             <DialogDescription className="text-xs">{activeChar?.description}</DialogDescription>
@@ -318,7 +418,7 @@ export default function Cast({ projectId }: { projectId: string }) {
           <div className="space-y-4">
             <div>
               <Label>Voice Type</Label>
-              <Select value={voiceType} onValueChange={(v) => setVoiceType(v as any)}>
+              <Select value={voiceType} onValueChange={(v) => setVoiceType(v as VoiceType)}>
                 <SelectTrigger className="mt-1">
                   <SelectValue />
                 </SelectTrigger>
@@ -326,6 +426,7 @@ export default function Cast({ projectId }: { projectId: string }) {
                   <SelectItem value="ai_designed">AI-Designed Voice</SelectItem>
                   <SelectItem value="user_clone">My Voice (Cloned)</SelectItem>
                   <SelectItem value="invite">Invite a Friend</SelectItem>
+                  <SelectItem value="library">From My Library</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -336,9 +437,7 @@ export default function Cast({ projectId }: { projectId: string }) {
                   <div>
                     <Label>Gender</Label>
                     <Select value={gender} onValueChange={setGender}>
-                      <SelectTrigger className="mt-1">
-                        <SelectValue />
-                      </SelectTrigger>
+                      <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         {GENDERS.map((g) => <SelectItem key={g} value={g}>{g}</SelectItem>)}
                       </SelectContent>
@@ -347,9 +446,7 @@ export default function Cast({ projectId }: { projectId: string }) {
                   <div>
                     <Label>Age</Label>
                     <Select value={age} onValueChange={setAge}>
-                      <SelectTrigger className="mt-1">
-                        <SelectValue />
-                      </SelectTrigger>
+                      <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         {AGES.map((a) => <SelectItem key={a} value={a}>{a.replace("_", " ")}</SelectItem>)}
                       </SelectContent>
@@ -358,9 +455,7 @@ export default function Cast({ projectId }: { projectId: string }) {
                   <div>
                     <Label>Accent</Label>
                     <Select value={accent} onValueChange={setAccent}>
-                      <SelectTrigger className="mt-1">
-                        <SelectValue />
-                      </SelectTrigger>
+                      <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         {ACCENTS.map((a) => <SelectItem key={a} value={a}>{a}</SelectItem>)}
                       </SelectContent>
@@ -369,9 +464,7 @@ export default function Cast({ projectId }: { projectId: string }) {
                   <div>
                     <Label>Style</Label>
                     <Select value={style} onValueChange={setStyle}>
-                      <SelectTrigger className="mt-1">
-                        <SelectValue />
-                      </SelectTrigger>
+                      <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         {STYLES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
                       </SelectContent>
@@ -379,21 +472,12 @@ export default function Cast({ projectId }: { projectId: string }) {
                   </div>
                 </div>
                 <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    className="flex-1"
-                    onClick={() => designVoice.mutate()}
-                    disabled={designVoice.isPending}
-                  >
+                  <Button variant="outline" className="flex-1" onClick={() => designVoice.mutate()} disabled={designVoice.isPending}>
                     {designVoice.isPending ? <Spinner className="w-4 h-4 mr-2" /> : null}
                     Design Voice
                   </Button>
                   {previewVoice && (
-                    <Button
-                      className="flex-1 glow-primary"
-                      onClick={() => saveVoice.mutate()}
-                      disabled={saveVoice.isPending}
-                    >
+                    <Button className="flex-1 glow-primary" onClick={() => saveVoice.mutate()} disabled={saveVoice.isPending}>
                       {saveVoice.isPending ? <Spinner className="w-4 h-4 mr-2" /> : null}
                       Use This Voice
                     </Button>
@@ -447,8 +531,38 @@ export default function Cast({ projectId }: { projectId: string }) {
                   disabled={!inviteName || sendInvite.isPending}
                 >
                   {sendInvite.isPending ? <Spinner className="w-4 h-4 mr-2" /> : null}
-                  Create Invite Link
+                  Create Invite Link & Copy
                 </Button>
+              </div>
+            )}
+
+            {voiceType === "library" && (
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">Pick a voice from your library to assign to this character.</p>
+                {library.length === 0 ? (
+                  <div className="text-center py-6 border border-dashed border-border rounded-xl">
+                    <div className="text-2xl mb-2">🎭</div>
+                    <p className="text-sm text-muted-foreground">Your library is empty.</p>
+                    <p className="text-xs text-muted-foreground mt-1">Invite friends to fill characters and their voices will appear here.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {libraryGroups.map((group) => {
+                      const entries = library.filter(e => (e.group || "Other") === group);
+                      if (entries.length === 0) return null;
+                      return (
+                        <div key={group}>
+                          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">{group}</p>
+                          <div className="space-y-2">
+                            {entries.map((entry) => (
+                              <LibraryVoiceCard key={entry.id} entry={entry} onSelect={assignFromLibrary} />
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
           </div>

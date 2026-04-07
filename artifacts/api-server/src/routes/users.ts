@@ -1,6 +1,6 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq } from "drizzle-orm";
-import { db, userProfilesTable } from "@workspace/db";
+import { eq, and } from "drizzle-orm";
+import { db, userProfilesTable, voiceLibraryTable } from "@workspace/db";
 import { GetUserProfileResponse, UpdateUserProfileBody, UpdateUserProfileResponse, CloneUserVoiceResponse } from "@workspace/api-zod";
 import { logger } from "../lib/logger";
 
@@ -59,8 +59,6 @@ router.put("/users/profile", async (req: Request, res: Response): Promise<void> 
   res.json(UpdateUserProfileResponse.parse(profile));
 });
 
-// Accepts multipart form data with "samples" files (from file picker or live recording)
-// Frontend converts files to base64 data URLs and sends JSON: { samples: string[], displayName: string }
 router.post("/users/voice-clone", async (req: Request, res: Response): Promise<void> => {
   if (!req.isAuthenticated()) {
     res.status(401).json({ error: "Unauthorized" });
@@ -80,7 +78,6 @@ router.post("/users/voice-clone", async (req: Request, res: Response): Promise<v
   }
 
   try {
-    // Get user's display name for the voice label
     const [profile] = await db
       .select()
       .from(userProfilesTable)
@@ -92,7 +89,6 @@ router.post("/users/voice-clone", async (req: Request, res: Response): Promise<v
     formData.append("name", voiceName);
     formData.append("description", `Voice profile for ${voiceName}`);
 
-    // Convert each base64 data URL to a blob and attach
     for (let i = 0; i < samples.length; i++) {
       const dataUrl = samples[i];
       const commaIdx = dataUrl.indexOf(",");
@@ -122,7 +118,6 @@ router.post("/users/voice-clone", async (req: Request, res: Response): Promise<v
     const data = await response.json() as { voice_id: string };
     const voiceCloneId = data.voice_id;
 
-    // Upsert profile with voice clone ID
     if (profile) {
       await db
         .update(userProfilesTable)
@@ -138,6 +133,99 @@ router.post("/users/voice-clone", async (req: Request, res: Response): Promise<v
   } catch (err) {
     logger.error({ err }, "Voice cloning error");
     res.status(500).json({ error: "Voice cloning failed" });
+  }
+});
+
+router.get("/users/voice-library", async (req: Request, res: Response): Promise<void> => {
+  if (!req.isAuthenticated()) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  const [profile] = await db
+    .select()
+    .from(userProfilesTable)
+    .where(eq(userProfilesTable.replitUserId, req.user.id));
+
+  if (!profile) {
+    res.json([]);
+    return;
+  }
+
+  const library = await db
+    .select()
+    .from(voiceLibraryTable)
+    .where(eq(voiceLibraryTable.ownerUserId, profile.id))
+    .orderBy(voiceLibraryTable.createdAt);
+
+  res.json(library);
+});
+
+router.delete("/users/voice-library/:id", async (req: Request, res: Response): Promise<void> => {
+  if (!req.isAuthenticated()) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  const libId = parseInt(req.params.id, 10);
+  if (isNaN(libId)) {
+    res.status(400).json({ error: "Invalid ID" });
+    return;
+  }
+
+  const [profile] = await db
+    .select()
+    .from(userProfilesTable)
+    .where(eq(userProfilesTable.replitUserId, req.user.id));
+
+  if (!profile) {
+    res.status(404).json({ error: "Profile not found" });
+    return;
+  }
+
+  await db
+    .delete(voiceLibraryTable)
+    .where(and(eq(voiceLibraryTable.id, libId), eq(voiceLibraryTable.ownerUserId, profile.id)));
+
+  res.status(204).end();
+});
+
+router.get("/voices/:voiceId/sample", async (req: Request, res: Response): Promise<void> => {
+  const { voiceId } = req.params;
+  const apiKey = process.env.ELEVENLABS_API_KEY;
+  if (!apiKey) {
+    res.status(500).json({ error: "ElevenLabs API key not configured" });
+    return;
+  }
+
+  try {
+    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+      method: "POST",
+      headers: {
+        "xi-api-key": apiKey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        text: "Hello, this is a preview of my voice.",
+        model_id: "eleven_multilingual_v2",
+        voice_settings: { stability: 0.5, similarity_boost: 0.75 },
+      }),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      req.log.error({ status: response.status, errText }, "ElevenLabs TTS preview failed");
+      res.status(500).json({ error: "Voice preview failed" });
+      return;
+    }
+
+    const audioBuffer = await response.arrayBuffer();
+    res.setHeader("Content-Type", "audio/mpeg");
+    res.setHeader("Cache-Control", "public, max-age=3600");
+    res.send(Buffer.from(audioBuffer));
+  } catch (err) {
+    logger.error({ err }, "Voice sample error");
+    res.status(500).json({ error: "Failed to generate voice sample" });
   }
 });
 

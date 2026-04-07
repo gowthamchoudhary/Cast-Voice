@@ -8,7 +8,19 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Spinner } from "@/components/ui/spinner";
+import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
+
+type VoiceLibraryEntry = {
+  id: number;
+  ownerUserId: number;
+  personName: string;
+  role: string | null;
+  group: string | null;
+  elevenLabsVoiceId: string;
+  inviteUuid: string | null;
+  createdAt: string;
+};
 
 function Nav() {
   const [, setLocation] = useLocation();
@@ -25,6 +37,79 @@ function Nav() {
         </nav>
       </div>
     </header>
+  );
+}
+
+function VoiceCard({ entry, onDelete }: { entry: VoiceLibraryEntry; onDelete: (id: number) => void }) {
+  const [playing, setPlaying] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const BASE_URL = import.meta.env.BASE_URL.replace(/\/$/, "");
+
+  const playPreview = async () => {
+    if (playing && audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+      setPlaying(false);
+      return;
+    }
+    setLoading(true);
+    try {
+      const audio = new Audio(`${BASE_URL}/api/voices/${entry.elevenLabsVoiceId}/sample`);
+      audioRef.current = audio;
+      audio.onended = () => { setPlaying(false); audioRef.current = null; };
+      audio.onerror = () => { setPlaying(false); setLoading(false); audioRef.current = null; };
+      await audio.play();
+      setPlaying(true);
+    } catch {
+      setPlaying(false);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const initials = entry.personName.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
+
+  return (
+    <div className="bg-card border border-border rounded-xl p-4 flex items-center gap-4">
+      <div className="w-11 h-11 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center text-primary font-serif font-bold text-sm shrink-0">
+        {initials}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="font-medium text-foreground text-sm truncate">{entry.personName}</p>
+        <div className="flex items-center gap-2 mt-0.5">
+          {entry.role && <span className="text-xs text-muted-foreground">{entry.role}</span>}
+          {entry.group && (
+            <Badge variant="outline" className="text-xs py-0 border-primary/30 text-primary">
+              {entry.group}
+            </Badge>
+          )}
+        </div>
+      </div>
+      <div className="flex items-center gap-2 shrink-0">
+        <button
+          onClick={playPreview}
+          disabled={loading}
+          className="w-8 h-8 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center text-primary hover:bg-primary/20 transition-colors disabled:opacity-50"
+          title={playing ? "Stop" : "Preview voice"}
+        >
+          {loading ? (
+            <Spinner className="w-3 h-3" />
+          ) : playing ? (
+            <span className="text-xs">⏹</span>
+          ) : (
+            <span className="text-xs">▶</span>
+          )}
+        </button>
+        <button
+          onClick={() => onDelete(entry.id)}
+          className="w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+          title="Remove from library"
+        >
+          <span className="text-xs">✕</span>
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -49,6 +134,11 @@ export default function Settings() {
   const { data: profileData, isLoading: profileLoading } = useQuery({
     queryKey: ["/api/users/profile"],
     queryFn: () => api.get("/api/users/profile").then((r) => r.json()),
+  });
+
+  const { data: libraryData, isLoading: libraryLoading } = useQuery<VoiceLibraryEntry[]>({
+    queryKey: ["/api/users/voice-library"],
+    queryFn: () => api.get("/api/users/voice-library").then((r) => r.json()),
   });
 
   useEffect(() => {
@@ -78,8 +168,6 @@ export default function Settings() {
   const cloneVoice = useMutation({
     mutationFn: async (files: File[]) => {
       if (files.length === 0) throw new Error("Please provide at least one voice sample.");
-
-      // Convert each file/blob to a base64 data URL so we can send as JSON
       const toDataUrl = (file: File | Blob): Promise<string> =>
         new Promise((resolve, reject) => {
           const reader = new FileReader();
@@ -87,7 +175,6 @@ export default function Settings() {
           reader.onerror = reject;
           reader.readAsDataURL(file);
         });
-
       const samples = await Promise.all(files.map((f) => toDataUrl(f)));
       const BASE_URL = import.meta.env.BASE_URL.replace(/\/$/, "");
       const r = await fetch(`${BASE_URL}/api/users/voice-clone`, {
@@ -105,6 +192,20 @@ export default function Settings() {
       setVoiceSamples([]);
       setRecordedBlobs([]);
       setCurrentBlob(null);
+    },
+    onError: (e: Error) => {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    },
+  });
+
+  const deleteLibraryEntry = useMutation({
+    mutationFn: async (id: number) => {
+      const r = await api.del(`/api/users/voice-library/${id}`);
+      if (!r.ok && r.status !== 204) throw new Error(await r.text());
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/users/voice-library"] });
+      toast({ title: "Voice removed from library" });
     },
     onError: (e: Error) => {
       toast({ title: "Error", description: e.message, variant: "destructive" });
@@ -147,7 +248,7 @@ export default function Settings() {
     setVoiceSamples((prev) => [...prev, file]);
     setCurrentBlob(null);
     setRecordingTime(0);
-    toast({ title: "Recording saved", description: `Sample ${recordedBlobs.length + 1} added. You can record more or submit.` });
+    toast({ title: "Recording saved", description: `Sample ${recordedBlobs.length + 1} added.` });
   };
 
   const formatTime = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
@@ -155,6 +256,9 @@ export default function Settings() {
   const handleLogout = () => {
     window.location.href = "/api/logout";
   };
+
+  const library = libraryData || [];
+  const groups = Array.from(new Set(library.map(e => e.group || "Other"))).sort();
 
   return (
     <div className="min-h-screen bg-background">
@@ -221,7 +325,6 @@ export default function Settings() {
             Aim for 30 seconds to 5 minutes of clear speech.
           </p>
 
-          {/* Tabs */}
           <div className="flex gap-1 p-1 bg-muted rounded-lg mb-5 w-fit">
             <button
               onClick={() => setVoiceTab("upload")}
@@ -286,12 +389,9 @@ export default function Settings() {
           ) : (
             <div className="space-y-4">
               <p className="text-xs text-muted-foreground">
-                Read a passage of text aloud — a few sentences to a minute works best. You can record multiple samples.
+                Read a passage of text aloud — a few sentences to a minute works best.
               </p>
-
-              {/* Recorder */}
               <div className="bg-muted rounded-xl p-5 flex flex-col items-center gap-4">
-                {/* Waveform visual */}
                 <div className="flex items-center gap-1 h-10">
                   {Array.from({ length: 16 }).map((_, i) => (
                     <div
@@ -308,55 +408,35 @@ export default function Settings() {
                     />
                   ))}
                 </div>
-
                 {recording && (
                   <div className="flex items-center gap-2 text-primary text-sm font-mono">
                     <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
                     {formatTime(recordingTime)}
                   </div>
                 )}
-
                 {!recording && currentBlob && (
                   <div className="text-center">
                     <p className="text-sm text-primary mb-1">✓ Recording ready ({formatTime(recordingTime)})</p>
-                    <audio
-                      controls
-                      src={URL.createObjectURL(currentBlob)}
-                      className="h-8 mt-1"
-                    />
+                    <audio controls src={URL.createObjectURL(currentBlob)} className="h-8 mt-1" />
                   </div>
                 )}
-
                 <div className="flex gap-2 w-full">
                   {!recording ? (
-                    <Button
-                      onClick={startRecording}
-                      className="flex-1"
-                      variant={currentBlob ? "outline" : "default"}
-                    >
+                    <Button onClick={startRecording} className="flex-1" variant={currentBlob ? "outline" : "default"}>
                       {currentBlob ? "Re-record" : "Start Recording"}
                     </Button>
                   ) : (
-                    <Button
-                      onClick={stopRecording}
-                      className="flex-1 bg-red-600 hover:bg-red-700 text-white border-0"
-                    >
+                    <Button onClick={stopRecording} className="flex-1 bg-red-600 hover:bg-red-700 text-white border-0">
                       ⏹ Stop
                     </Button>
                   )}
                   {currentBlob && !recording && (
-                    <Button
-                      onClick={saveRecording}
-                      className="flex-1 glow-primary"
-                      disabled={recordedBlobs.length >= 5}
-                    >
+                    <Button onClick={saveRecording} className="flex-1 glow-primary" disabled={recordedBlobs.length >= 5}>
                       Add Sample
                     </Button>
                   )}
                 </div>
               </div>
-
-              {/* Saved recordings list */}
               {recordedBlobs.length > 0 && (
                 <div className="space-y-2">
                   <p className="text-sm font-medium text-foreground">{recordedBlobs.length} sample(s) ready</p>
@@ -377,7 +457,6 @@ export default function Settings() {
                   ))}
                 </div>
               )}
-
               <Button
                 onClick={() => cloneVoice.mutate(voiceSamples)}
                 disabled={voiceSamples.length === 0 || cloneVoice.isPending || recording}
@@ -388,6 +467,54 @@ export default function Settings() {
                   ? `Clone My Voice (${voiceSamples.length} sample${voiceSamples.length > 1 ? "s" : ""})`
                   : "Clone My Voice"}
               </Button>
+            </div>
+          )}
+        </section>
+
+        {/* Voice Library section */}
+        <section className="bg-card border border-border rounded-xl p-6 mb-6">
+          <div className="flex items-center justify-between mb-1">
+            <h2 className="font-serif text-xl font-semibold text-foreground">My Voice Library</h2>
+            {library.length > 0 && (
+              <Badge variant="secondary">{library.length} voice{library.length !== 1 ? "s" : ""}</Badge>
+            )}
+          </div>
+          <p className="text-muted-foreground text-sm mb-5">
+            Voices cloned from friends who joined via your invite links. Use them to cast characters in any project.
+          </p>
+
+          {libraryLoading ? (
+            <div className="flex justify-center py-6"><Spinner /></div>
+          ) : library.length === 0 ? (
+            <div className="text-center py-8 border border-dashed border-border rounded-xl">
+              <div className="text-3xl mb-2">🎭</div>
+              <p className="text-sm text-muted-foreground">No voices yet.</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Invite friends to voice characters — their clones will appear here.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {groups.map((group) => {
+                const entries = library.filter(e => (e.group || "Other") === group);
+                if (entries.length === 0) return null;
+                return (
+                  <div key={group}>
+                    <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+                      {group}
+                    </h3>
+                    <div className="space-y-2">
+                      {entries.map((entry) => (
+                        <VoiceCard
+                          key={entry.id}
+                          entry={entry}
+                          onDelete={(id) => deleteLibraryEntry.mutate(id)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </section>

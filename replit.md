@@ -29,7 +29,7 @@ pnpm workspace monorepo using TypeScript. This is **CastVoice** — a cinematic 
 - `lib/api-spec` — OpenAPI YAML spec + Zod schemas (codegen via Orval)
 - `lib/api-client-react` — React Query hooks generated from spec
 - `lib/db` — Drizzle ORM schema and DB client
-  - `lib/db/src/schema/castvoice.ts` — userProfiles, stories, projects, inviteLinks
+  - `lib/db/src/schema/castvoice.ts` — userProfiles, stories, projects, inviteLinks, voiceLibrary
   - `lib/db/src/schema/auth.ts` — sessions, users (from Replit Auth template)
 - `lib/replit-auth-web` — `useAuth()` hook for frontend auth state
 
@@ -48,11 +48,11 @@ pnpm --filter @workspace/api-spec run codegen  # regenerate API types
 1. **Landing page** (`/`) — hero + feature cards, Replit Auth sign-in
 2. **Dashboard** (`/dashboard`) — user's projects list, status badges
 3. **Stories** (`/stories`) — browse 5 seeded stories + import custom
-4. **Cast** (`/cast/:id`) — assign AI/clone/invite voices to each character
+4. **Cast** (`/cast/:id`) — assign AI/clone/invite/library voices to each character
 5. **Generate** (`/generate/:id`) — polling progress page, auto-redirects
 6. **Play** (`/play/:id`) — audio player + script display + scene imagery
-7. **Settings** (`/settings`) — profile + voice clone upload
-8. **Join** (`/join/:uuid`) — invite page for friends to record voices
+7. **Settings** (`/settings`) — profile + voice clone + My Voice Library (browse, preview, delete)
+8. **Join** (`/join/:uuid`) — invite page: auth gate, record/upload, tagged submission → owner's Voice Library
 
 ## Important Details
 
