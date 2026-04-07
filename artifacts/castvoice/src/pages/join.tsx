@@ -222,7 +222,7 @@ export default function Join({ uuid }: { uuid: string }) {
             <Button
               className="w-full glow-primary"
               onClick={() => {
-                window.location.href = `${BASE_URL}/api/auth/login?return_to=${encodeURIComponent(window.location.pathname)}`;
+                window.location.href = `/api/login?returnTo=${encodeURIComponent(window.location.pathname)}`;
               }}
             >
               Sign in with Replit

@@ -1,0 +1,141 @@
+Fix these issues in CastVoice. Go one by one, completely:
+
+=== FIX 1: AUTHENTICATION ===
+The "Sign in with Replit" button throws "Invalid authentication request". 
+Fix Replit Auth completely. Make sure:
+- The Replit Auth middleware is properly configured in Express
+- The /api/auth/user endpoint returns current user correctly
+- Frontend reads auth state properly on load
+- After successful login, redirect to /dashboard
+- If not logged in, redirect to / (auth page)
+- Test that login → dashboard flow works end to end
+
+=== FIX 2: VOICE LIBRARY SYSTEM ===
+Create a full Voice Library that belongs to each user.
+
+DATABASE: Add a voice_library table:
+- id, owner_user_id, contributor_name, contributor_user_id (nullable), 
+  category (Family/Friends/Colleagues/Custom), custom_category_name, 
+  role (Hero/Villain/Side Character), elevenlabs_voice_id, 
+  preview_audio_url, created_at
+
+SETTINGS PAGE — add "My Voice Library" section:
+- Show all saved voices as cards grouped by category
+- Each card: person's name, role badge, category tag, 
+  play button to preview their voice
+- Button: "Add Voice Manually" — opens modal with fields:
+  Name, Category (dropdown: Family/Friends/Colleagues + type custom), 
+  Role (Hero/Villain/Side Character),
+  Voice input: Upload file (.mp3/.wav) OR Record Live in browser
+  Submit → calls ElevenLabs Voice Cloning API → saves to voice_library
+- Empty state: "Your library is empty. Invite friends or add voices manually."
+
+=== FIX 3: CAST ASSIGNMENT — VOICE SELECTION ===
+In the character casting modal, support these four options as clear tabs:
+
+TAB 1 — "My Voice"
+Use the logged-in user's own cloned voice (from their profile settings).
+Only show if they have a voice clone saved.
+
+TAB 2 — "From Library"  
+Show a browsable grid of ALL voices in the user's voice_library.
+Each voice shows: name, role, category, play preview button.
+Clicking one selects it and assigns their elevenlabs_voice_id to this character.
+If library is empty, show: "No voices yet. Add some in Settings."
+
+TAB 3 — "AI Generate"
+Show a text input: "Describe this voice..."
+Placeholder: "e.g. deep, gravelly, 50s detective, world-weary"
+Show clickable preset chips: [Deep] [Warm] [Young] [Robotic] [Ethereal] 
+[Commanding] [Nervous] [Playful] [Raspy] [Gentle]
+Chips append to the text input when clicked.
+On Generate Audio Drama: call ElevenLabs Voice Design API with this description.
+Voice Design API: POST https://api.elevenlabs.io/v1/voice-generation/generate-voice
+Body: { "voice_description": "{user description}", "text": "Hello, I am ready." }
+This returns a voice preview. Store the generated voice_id for use in TTS.
+
+TAB 4 — "Invite Friend"
+Show: "Send this person a link to record their voice for this character."
+Generate unique link: /join/{projectId}/{characterId}/{uuid}
+Show the full URL in a styled box — visually clear, easy to read and copy.
+Copy button copies to clipboard.
+Show WhatsApp share button: opens wa.me with pre-written message:
+"Hey! [User's name] wants you to voice [Character Name] in their audio drama 
+on CastVoice. Takes 2 minutes — just record your voice here: [link]"
+Once link is sent, show "Waiting for [Character Name]..." with a subtle pulse animation.
+If not filled when Generate is clicked, auto-fall back to AI Generate 
+using the character's role description as the voice description.
+
+=== FIX 4: INVITE LINK PAGE (/join/:projectId/:characterId/:uuid) ===
+This page is for the FRIEND who receives the invite. Build it completely:
+
+STEP 1 — Landing:
+Show CastVoice logo.
+Card: "[Inviter's display name] has invited you to voice [Character Name]"
+Character description shown below.
+Story title and genre shown.
+Button: "Accept & Add My Voice" 
+Below: "You'll need to create a free account. Takes 30 seconds."
+
+STEP 2 — Auth:
+Trigger Replit Auth login/signup.
+After auth, return to the same /join URL with session active.
+
+STEP 3 — Record Voice:
+Show: "Now let's capture your voice, [their name]"
+Two options: Upload File (.mp3/.wav) OR Record Live (browser mic, 
+show waveform while recording, min 15 seconds)
+Preview playback before submitting.
+Button: "Send My Voice to [Inviter Name]"
+
+STEP 4 — Backend processing:
+Call ElevenLabs Voice Cloning API with their audio:
+POST https://api.elevenlabs.io/v1/voices/add
+FormData: name="{their name} - {character name}", files=[audio], 
+description="{character description}"
+Save returned voice_id to:
+  1. The inviter's voice_library table (contributor_name, contributor_user_id, 
+     category auto-set from character role, elevenlabs_voice_id)
+  2. The project's cast_json — mark this character slot as filled 
+     with this voice_id
+Update invite link status to "filled" in DB.
+
+STEP 5 — Success screen:
+"Your voice has been added! [Inviter name] will be notified."
+"Want to create your own audio drama?" → Button: "Try CastVoice"
+
+STEP 6 — Notify inviter:
+When inviter's cast page is open, poll every 10 seconds for invite status.
+When filled: show toast notification: "[Person's name] has joined as 
+[Character Name]!" and update the character card to show their name + filled badge.
+
+=== FIX 5: ELEVENLABS TTS WITH EMOTION ===
+During audio generation, for each dialogue line in the script JSON:
+- Use the character's assigned voice_id (from any of the 4 methods above)
+- Call TTS API: POST https://api.elevenlabs.io/v1/text-to-speech/{voice_id}
+- Body: {
+    "text": "{dialogue text}",
+    "model_id": "eleven_multilingual_v2",
+    "voice_settings": {
+      "stability": {from line's stability value in script},
+      "similarity_boost": 0.85,
+      "style": {map emotion to style: panic=0.9, calm=0.2, excited=0.8, sad=0.6, default=0.5},
+      "use_speaker_boost": true
+    }
+  }
+- Save each audio chunk as a file
+- After all lines generated, use ffmpeg to concatenate in order
+- Insert SFX audio (from ElevenLabs Sound Effects API) at marked cue points
+- SFX API: POST https://api.elevenlabs.io/v1/sound-generation
+  Body: { "text": "{sfx description}", "duration_seconds": 3, "prompt_influence": 0.3 }
+- Final output: single mixed .mp3 file stored and linked to project
+
+=== FIX 6: AI VOICE DESIGN FULL FLOW ===
+When a character has "AI Generate" selected with a description:
+1. Call Voice Design API to get a preview voice_id
+2. Store that voice_id against the character in cast_json
+3. Use that voice_id in TTS generation — same flow as cloned voices
+4. Voice Design voices should sound like the description — 
+   pass the description as context in TTS voice settings too
+
+Make all 6 fixes completely. Test each one. Do not skip any.

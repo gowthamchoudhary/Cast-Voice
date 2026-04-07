@@ -1,9 +1,6 @@
 import { eq } from "drizzle-orm";
-import { db, projectsTable, storiesTable } from "@workspace/db";
+import { db, projectsTable, storiesTable, inviteLinksTable, userProfilesTable } from "@workspace/db";
 import { logger } from "./logger";
-import path from "path";
-import fs from "fs";
-import os from "os";
 
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
 
@@ -22,10 +19,35 @@ interface ScriptScene {
 }
 
 interface CastEntry {
-  type: "my_voice" | "designed" | "invite";
-  voiceId?: string;
+  voiceType: "user_clone" | "ai_designed" | "library" | "invite";
+  elevenLabsVoiceId?: string;
   description?: string;
   inviteUuid?: string;
+  personName?: string;
+}
+
+const EMOTION_STYLE_MAP: Record<string, number> = {
+  panic: 0.9,
+  angry: 0.85,
+  excited: 0.8,
+  fearful: 0.75,
+  surprised: 0.7,
+  happy: 0.65,
+  cheerful: 0.65,
+  neutral: 0.5,
+  default: 0.5,
+  thoughtful: 0.45,
+  sad: 0.4,
+  melancholy: 0.35,
+  calm: 0.2,
+  peaceful: 0.15,
+  whisper: 0.1,
+};
+
+function emotionToStyle(emotion: string): number {
+  if (!emotion) return 0.5;
+  const key = emotion.toLowerCase().trim();
+  return EMOTION_STYLE_MAP[key] ?? 0.5;
 }
 
 async function updateProgress(projectId: number, progress: number, step: string) {
@@ -35,9 +57,16 @@ async function updateProgress(projectId: number, progress: number, step: string)
     .where(eq(projectsTable.id, projectId));
 }
 
-async function elevenLabsTTS(voiceId: string, text: string, stability: number): Promise<Buffer | null> {
+async function elevenLabsTTS(
+  voiceId: string,
+  text: string,
+  emotion: string,
+  stability: number,
+): Promise<Buffer | null> {
   if (!ELEVENLABS_API_KEY) return null;
-  
+
+  const style = emotionToStyle(emotion);
+
   try {
     const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
       method: "POST",
@@ -52,14 +81,14 @@ async function elevenLabsTTS(voiceId: string, text: string, stability: number): 
         voice_settings: {
           stability,
           similarity_boost: 0.8,
-          style: 0.6,
+          style,
           use_speaker_boost: true,
         },
       }),
     });
 
     if (!response.ok) {
-      logger.warn({ status: response.status, voiceId }, "TTS request failed");
+      logger.warn({ status: response.status, voiceId, emotion }, "TTS request failed");
       return null;
     }
 
@@ -73,7 +102,7 @@ async function elevenLabsTTS(voiceId: string, text: string, stability: number): 
 
 async function elevenLabsSFX(description: string): Promise<Buffer | null> {
   if (!ELEVENLABS_API_KEY) return null;
-  
+
   try {
     const response = await fetch("https://api.elevenlabs.io/v1/sound-generation", {
       method: "POST",
@@ -107,8 +136,10 @@ async function getPollinationsImageUrl(prompt: string): Promise<string> {
   return `https://image.pollinations.ai/prompt/${encoded}?width=1280&height=720&nologo=true`;
 }
 
-async function designVoice(description: string): Promise<string> {
+async function designVoice(description: string, characterName?: string): Promise<string> {
   if (!ELEVENLABS_API_KEY) return getDefaultVoice(description);
+
+  const previewText = `Hello. I am ${characterName || "a character"}, ready to bring this story to life.`;
 
   try {
     const response = await fetch("https://api.elevenlabs.io/v1/voice-generation/generate-voice", {
@@ -118,11 +149,8 @@ async function designVoice(description: string): Promise<string> {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        gender: "neutral",
-        age: "middle_aged",
-        accent: "american",
-        accent_strength: 1.0,
-        text: "Hello, I am ready to voice this character for the audio drama.",
+        voice_description: description.trim(),
+        text: previewText,
       }),
     });
 
@@ -138,14 +166,14 @@ async function designVoice(description: string): Promise<string> {
 }
 
 function getDefaultVoice(description: string): string {
-  const desc = description?.toLowerCase() || "";
-  if (desc.includes("deep") || desc.includes("gruff")) return "pNInz6obpgDQGcFmaJgB";
-  if (desc.includes("warm") || desc.includes("gentle")) return "EXAVITQu4vr4xnSDxMaL";
-  if (desc.includes("young") || desc.includes("teen")) return "jBpfuIE2acCo8z3wKNLl";
-  if (desc.includes("command") || desc.includes("leader")) return "VR6AewLTigWG4xSOukaG";
-  if (desc.includes("nervous") || desc.includes("scared")) return "oWAxZDx7w5VEj9dCyTzz";
-  if (desc.includes("playful") || desc.includes("fun")) return "jsCqWAovK2LkecY7zXl4";
-  if (desc.includes("ethereal") || desc.includes("mystic")) return "XB0fDUnXU5powFXDhCwa";
+  const desc = (description || "").toLowerCase();
+  if (desc.includes("deep") || desc.includes("gruff") || desc.includes("baritone")) return "pNInz6obpgDQGcFmaJgB";
+  if (desc.includes("warm") || desc.includes("gentle") || desc.includes("feminine")) return "EXAVITQu4vr4xnSDxMaL";
+  if (desc.includes("young") || desc.includes("teen") || desc.includes("energetic")) return "jBpfuIE2acCo8z3wKNLl";
+  if (desc.includes("command") || desc.includes("leader") || desc.includes("villain")) return "VR6AewLTigWG4xSOukaG";
+  if (desc.includes("nervous") || desc.includes("scared") || desc.includes("timid")) return "oWAxZDx7w5VEj9dCyTzz";
+  if (desc.includes("playful") || desc.includes("fun") || desc.includes("cheerful")) return "jsCqWAovK2LkecY7zXl4";
+  if (desc.includes("ethereal") || desc.includes("mystic") || desc.includes("mysterious")) return "XB0fDUnXU5powFXDhCwa";
   return "pNInz6obpgDQGcFmaJgB";
 }
 
@@ -170,43 +198,85 @@ export async function generateAudioDrama(projectId: number): Promise<void> {
     throw new Error(`Story ${project.storyId} not found`);
   }
 
+  // Look up owner's voice clone ID for user_clone assignments
+  const [ownerProfile] = await db
+    .select()
+    .from(userProfilesTable)
+    .where(eq(userProfilesTable.replitUserId, project.userId));
+
+  const ownerVoiceCloneId = ownerProfile?.voiceCloneId;
+
   const castJson = (project.castJson as Record<string, CastEntry>) || {};
   const script = story.scriptJson as { scenes: ScriptScene[] };
-  const scenes: ScriptScene[] = script.scenes || [];
+  const scenes: ScriptScene[] = script?.scenes || [];
   const storyCharacters = (story.characters as Array<{ id: string; name: string; description: string }>) || [];
 
-  // Build character name -> character id map
   const charNameToId = new Map<string, string>();
   for (const char of storyCharacters) {
     charNameToId.set(char.name, char.id);
   }
 
-  // STEP 1: Design voices for characters that need it
+  // STEP 1: Resolve voices for all characters
   await updateProgress(projectId, 5, "Designing character voices...");
-  
+
   const voiceMap = new Map<string, string>(); // characterId -> voiceId
-  
+
   for (const char of storyCharacters) {
     const castEntry = castJson[char.id];
-    if (!castEntry) continue;
-    
-    if (castEntry.type === "my_voice" && castEntry.voiceId) {
-      voiceMap.set(char.id, castEntry.voiceId);
-    } else if (castEntry.type === "designed") {
-      const voiceId = await designVoice(castEntry.description || char.description);
+    if (!castEntry) {
+      // No cast entry — fall back to AI design from character description
+      const voiceId = await designVoice(char.description, char.name);
       voiceMap.set(char.id, voiceId);
-    } else if (castEntry.type === "invite" && castEntry.voiceId) {
-      voiceMap.set(char.id, castEntry.voiceId);
+      continue;
+    }
+
+    if (castEntry.voiceType === "user_clone") {
+      if (ownerVoiceCloneId) {
+        voiceMap.set(char.id, ownerVoiceCloneId);
+      } else {
+        voiceMap.set(char.id, getDefaultVoice(char.description));
+      }
+    } else if (castEntry.voiceType === "ai_designed") {
+      if (castEntry.elevenLabsVoiceId) {
+        // Already designed during cast setup
+        voiceMap.set(char.id, castEntry.elevenLabsVoiceId);
+      } else {
+        const voiceId = await designVoice(
+          castEntry.description || char.description,
+          char.name,
+        );
+        voiceMap.set(char.id, voiceId);
+      }
+    } else if (castEntry.voiceType === "library" && castEntry.elevenLabsVoiceId) {
+      voiceMap.set(char.id, castEntry.elevenLabsVoiceId);
+    } else if (castEntry.voiceType === "invite") {
+      // Look up the invite to get the cloned voice ID
+      if (castEntry.inviteUuid) {
+        const [invite] = await db
+          .select()
+          .from(inviteLinksTable)
+          .where(eq(inviteLinksTable.uuid, castEntry.inviteUuid));
+        if (invite?.voiceCloneId) {
+          voiceMap.set(char.id, invite.voiceCloneId);
+        } else {
+          // Invite not filled yet — use character description to design
+          const voiceId = await designVoice(char.description, char.name);
+          voiceMap.set(char.id, voiceId);
+        }
+      } else if (castEntry.elevenLabsVoiceId) {
+        voiceMap.set(char.id, castEntry.elevenLabsVoiceId);
+      } else {
+        voiceMap.set(char.id, getDefaultVoice(char.description));
+      }
     } else {
-      // Fallback
       voiceMap.set(char.id, getDefaultVoice(char.description));
     }
   }
 
   await updateProgress(projectId, 20, "Writing emotional delivery for each line...");
-  await new Promise(r => setTimeout(r, 1000));
+  await new Promise(r => setTimeout(r, 800));
 
-  // STEP 2 & 3: Generate dialogue audio files
+  // STEP 2: Generate dialogue audio
   await updateProgress(projectId, 30, "Generating dialogue...");
 
   const audioSegments: Buffer[] = [];
@@ -214,35 +284,34 @@ export async function generateAudioDrama(projectId: number): Promise<void> {
   let processedLines = 0;
 
   for (const scene of scenes) {
-    // Generate SFX for the scene
     if (scene.sfx_before) {
       const sfxBuffer = await elevenLabsSFX(scene.sfx_before);
-      if (sfxBuffer) {
-        audioSegments.push(sfxBuffer);
-      }
+      if (sfxBuffer) audioSegments.push(sfxBuffer);
     }
 
     for (const line of scene.lines) {
       const charId = charNameToId.get(line.character);
       const voiceId = charId ? voiceMap.get(charId) : undefined;
-      
+
       if (voiceId && line.text) {
         const stability = line.stability ?? 0.5;
-        const audioBuffer = await elevenLabsTTS(voiceId, line.text, stability);
-        if (audioBuffer) {
-          audioSegments.push(audioBuffer);
-        }
+        const audioBuffer = await elevenLabsTTS(voiceId, line.text, line.emotion || "neutral", stability);
+        if (audioBuffer) audioSegments.push(audioBuffer);
       }
-      
+
       processedLines++;
-      const progress = 30 + Math.floor((processedLines / totalLines) * 40);
-      await updateProgress(projectId, progress, `Generating dialogue... (${processedLines}/${totalLines} lines)`);
+      const progress = 30 + Math.floor((processedLines / totalLines) * 45);
+      await updateProgress(
+        projectId,
+        progress,
+        `Generating dialogue... (${processedLines}/${totalLines} lines)`,
+      );
     }
   }
 
-  // STEP 4: Generate scene images
-  await updateProgress(projectId, 75, "Adding sound effects...");
-  
+  // STEP 3: Generate scene images
+  await updateProgress(projectId, 78, "Generating scene imagery...");
+
   const sceneImages: Record<string, string> = {};
   if (story.sceneImagePrompt) {
     sceneImages["main"] = await getPollinationsImageUrl(story.sceneImagePrompt);
@@ -250,7 +319,6 @@ export async function generateAudioDrama(projectId: number): Promise<void> {
   if (story.sceneImageUrl) {
     sceneImages["cover"] = story.sceneImageUrl;
   }
-
   for (let i = 0; i < scenes.length; i++) {
     const scene = scenes[i];
     if (scene.scene_description) {
@@ -258,15 +326,12 @@ export async function generateAudioDrama(projectId: number): Promise<void> {
     }
   }
 
-  // STEP 5: Mix audio
-  await updateProgress(projectId, 85, "Mixing the final drama...");
+  // STEP 4: Mix audio
+  await updateProgress(projectId, 88, "Mixing the final drama...");
 
   let finalAudioUrl: string | null = null;
-
   if (audioSegments.length > 0) {
     try {
-      // Save combined audio as base64 data URL  
-      // Simple concatenation of MP3 segments (basic mixing)
       const combined = Buffer.concat(audioSegments);
       const base64Audio = combined.toString("base64");
       finalAudioUrl = `data:audio/mpeg;base64,${base64Audio}`;
@@ -275,15 +340,9 @@ export async function generateAudioDrama(projectId: number): Promise<void> {
     }
   }
 
-  // If no real audio was generated, create a simple placeholder
-  if (!finalAudioUrl) {
-    finalAudioUrl = null;
-  }
-
   await updateProgress(projectId, 95, "Finalizing your audio drama...");
   await new Promise(r => setTimeout(r, 500));
 
-  // Update project as ready
   await db
     .update(projectsTable)
     .set({

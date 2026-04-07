@@ -136,6 +136,98 @@ router.post("/users/voice-clone", async (req: Request, res: Response): Promise<v
   }
 });
 
+router.post("/users/voice-library", async (req: Request, res: Response): Promise<void> => {
+  if (!req.isAuthenticated()) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  const { personName, group, role, samples } = req.body as {
+    personName?: string;
+    group?: string;
+    role?: string;
+    samples?: string[];
+  };
+
+  if (!personName || typeof personName !== "string" || personName.trim().length === 0) {
+    res.status(400).json({ error: "Person name is required" });
+    return;
+  }
+  if (!samples || !Array.isArray(samples) || samples.length === 0) {
+    res.status(400).json({ error: "At least one audio sample is required" });
+    return;
+  }
+
+  const apiKey = process.env.ELEVENLABS_API_KEY;
+  if (!apiKey) {
+    res.status(500).json({ error: "ElevenLabs API key not configured" });
+    return;
+  }
+
+  try {
+    let profile = (
+      await db.select().from(userProfilesTable).where(eq(userProfilesTable.replitUserId, req.user.id))
+    )[0];
+
+    if (!profile) {
+      [profile] = await db
+        .insert(userProfilesTable)
+        .values({ replitUserId: req.user.id, displayName: req.user.id })
+        .returning();
+    }
+
+    const voiceName = `${personName.trim()} (${req.user.id})`;
+    const formData = new FormData();
+    formData.append("name", voiceName);
+    formData.append("description", `Voice for ${personName.trim()} — added manually`);
+
+    for (let i = 0; i < samples.length; i++) {
+      const dataUrl = samples[i];
+      const commaIdx = dataUrl.indexOf(",");
+      if (commaIdx === -1) continue;
+      const mimeMatch = dataUrl.match(/data:([^;]+);base64/);
+      const mimeType = mimeMatch?.[1] ?? "audio/webm";
+      const ext = mimeType.includes("mp3") ? "mp3" : mimeType.includes("wav") ? "wav" : "webm";
+      const base64Data = dataUrl.slice(commaIdx + 1);
+      const audioBuffer = Buffer.from(base64Data, "base64");
+      const blob = new Blob([audioBuffer], { type: mimeType });
+      formData.append("files", blob, `sample_${i + 1}.${ext}`);
+    }
+
+    const response = await fetch("https://api.elevenlabs.io/v1/voices/add", {
+      method: "POST",
+      headers: { "xi-api-key": apiKey },
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      logger.error({ status: response.status, errText }, "ElevenLabs voice clone failed for library entry");
+      res.status(500).json({ error: "Voice cloning failed: " + errText });
+      return;
+    }
+
+    const data = await response.json() as { voice_id: string };
+
+    const [entry] = await db
+      .insert(voiceLibraryTable)
+      .values({
+        ownerUserId: profile.id,
+        personName: personName.trim(),
+        role: role?.trim() || null,
+        group: group?.trim() || "Other",
+        elevenLabsVoiceId: data.voice_id,
+        inviteUuid: null,
+      })
+      .returning();
+
+    res.json(entry);
+  } catch (err) {
+    logger.error({ err }, "Voice library manual add error");
+    res.status(500).json({ error: "Failed to add voice to library" });
+  }
+});
+
 router.get("/users/voice-library", async (req: Request, res: Response): Promise<void> => {
   if (!req.isAuthenticated()) {
     res.status(401).json({ error: "Unauthorized" });
