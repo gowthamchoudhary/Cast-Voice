@@ -550,9 +550,15 @@ export default function Cast({ projectId }: { projectId: string }) {
   const [activeChar, setActiveChar] = useState<Character | null>(null);
   const [castAssignments, setCastAssignments] = useState<Record<string, Voice>>({});
 
+  // Poll every 15s if any invite is still waiting for a voice submission
+  const hasWaitingInvites = Object.values(castAssignments).some(
+    (v) => v.voiceType === "invite" && !v.elevenLabsVoiceId
+  );
+
   const { data: project, isLoading } = useQuery<Project>({
     queryKey: [`/api/projects/${projectId}`],
     queryFn: () => api.get(`/api/projects/${projectId}`).then(r => r.json()),
+    refetchInterval: hasWaitingInvites ? 15000 : false,
   });
 
   const { data: voiceLibrary } = useQuery<VoiceLibraryEntry[]>({
@@ -566,9 +572,20 @@ export default function Cast({ projectId }: { projectId: string }) {
   });
 
   useEffect(() => {
-    if (project?.castJson?.voices && Object.keys(castAssignments).length === 0) {
-      setCastAssignments(project.castJson.voices as Record<string, Voice>);
-    }
+    if (!project?.castJson?.voices) return;
+    const incoming = project.castJson.voices as Record<string, Voice>;
+    // Merge: keep local state but upgrade any invite entries that now have a voice ID
+    setCastAssignments((prev) => {
+      const merged = { ...prev };
+      for (const [charId, voice] of Object.entries(incoming)) {
+        const existing = merged[charId];
+        // Always sync when: no local entry, or incoming has a voiceId we don't have yet
+        if (!existing || (voice.elevenLabsVoiceId && !existing.elevenLabsVoiceId)) {
+          merged[charId] = voice;
+        }
+      }
+      return merged;
+    });
   }, [project]);
 
   const startGeneration = useMutation({
@@ -596,14 +613,18 @@ export default function Cast({ projectId }: { projectId: string }) {
 
   const getVoiceLabel = (v: Voice) => {
     if (v.voiceType === "ai_designed") return "AI Voice";
-    if (v.voiceType === "invite") return `Invited: ${v.inviteName || "Friend"}`;
+    if (v.voiceType === "invite") {
+      return v.elevenLabsVoiceId
+        ? `Voice Received ✓`
+        : `Waiting: ${v.inviteName || "Friend"}`;
+    }
     if (v.voiceType === "library") return v.personName || "Library";
     return "My Voice";
   };
 
   const getVoiceEmoji = (v: Voice) => {
     if (v.voiceType === "ai_designed") return "✨";
-    if (v.voiceType === "invite") return "🔗";
+    if (v.voiceType === "invite") return v.elevenLabsVoiceId ? "✅" : "⏳";
     if (v.voiceType === "library") return "📚";
     return "🎙";
   };
@@ -662,7 +683,14 @@ export default function Cast({ projectId }: { projectId: string }) {
                     {char.name[0]}
                   </div>
                   {assigned && (
-                    <Badge variant="outline" className="text-xs border-primary/40 text-primary">
+                    <Badge
+                      variant="outline"
+                      className={`text-xs ${
+                        assigned.voiceType === "invite" && !assigned.elevenLabsVoiceId
+                          ? "border-amber-500/40 text-amber-500"
+                          : "border-primary/40 text-primary"
+                      }`}
+                    >
                       {getVoiceEmoji(assigned)} {getVoiceLabel(assigned)}
                     </Badge>
                   )}

@@ -1,7 +1,7 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { eq } from "drizzle-orm";
 import { db, inviteLinksTable, projectsTable, storiesTable, userProfilesTable, voiceLibraryTable } from "@workspace/db";
-import { CreateInviteLinkBody, GetInviteLinkParams, SubmitInviteVoiceParams } from "@workspace/api-zod";
+import { CreateInviteLinkBody, GetInviteLinkParams, SubmitInviteVoiceParams, SubmitInviteVoiceBody } from "@workspace/api-zod";
 import { randomUUID } from "crypto";
 import { logger } from "../lib/logger";
 
@@ -19,14 +19,14 @@ router.post("/invites", async (req: Request, res: Response): Promise<void> => {
     return;
   }
 
-  const uuid = randomUUID();
-
+  // Get the inviter's profile so we can record who created the invite
   const [inviterProfile] = await db
     .select()
     .from(userProfilesTable)
     .where(eq(userProfilesTable.replitUserId, req.user.id))
     .limit(1);
 
+  const uuid = randomUUID();
   const [invite] = await db
     .insert(inviteLinksTable)
     .values({
@@ -57,6 +57,7 @@ router.get("/invites/:uuid", async (req: Request, res: Response): Promise<void> 
     return;
   }
 
+  // Get project and story info
   const [project] = await db
     .select()
     .from(projectsTable)
@@ -73,13 +74,14 @@ router.get("/invites/:uuid", async (req: Request, res: Response): Promise<void> 
     .where(eq(storiesTable.id, project.storyId));
 
   const characters = (story?.characters as Array<{ id: string; name: string; description: string }>) || [];
-  const character = characters.find(c => c.id === invite.characterId) || {
+  const character = characters.find((c) => c.id === invite.characterId) || {
     id: invite.characterId,
     name: "Character",
     description: "A character in the story",
   };
 
-  let inviterName = "Someone";
+  // Get inviter's display name
+  let inviterName = "Your friend";
   if (invite.inviterProfileId) {
     const [inviterProfile] = await db
       .select()
@@ -100,7 +102,7 @@ router.get("/invites/:uuid", async (req: Request, res: Response): Promise<void> 
 
 router.post("/invites/:uuid/submit", async (req: Request, res: Response): Promise<void> => {
   if (!req.isAuthenticated()) {
-    res.status(401).json({ error: "Unauthorized - please sign in to submit your voice" });
+    res.status(401).json({ error: "Unauthorized" });
     return;
   }
 
@@ -110,17 +112,11 @@ router.post("/invites/:uuid/submit", async (req: Request, res: Response): Promis
     return;
   }
 
-  const { audioDataUrl, displayName, role, group } = req.body as {
-    audioDataUrl?: string;
-    displayName?: string;
-    role?: string;
-    group?: string;
-  };
-  if (!audioDataUrl || !displayName) {
-    res.status(400).json({ error: "audioDataUrl and displayName are required" });
+  const body = SubmitInviteVoiceBody.safeParse(req.body);
+  if (!body.success) {
+    res.status(400).json({ error: body.error.message });
     return;
   }
-  const body = { data: { audioDataUrl, displayName, role, group } };
 
   const [invite] = await db
     .select()
@@ -172,56 +168,61 @@ router.post("/invites/:uuid/submit", async (req: Request, res: Response): Promis
     if (!response.ok) {
       const errText = await response.text();
       req.log.error({ status: response.status, errText }, "Voice clone failed");
-      res.status(500).json({ error: "Voice cloning failed" });
+      res.status(500).json({ error: "Voice cloning failed: " + errText });
       return;
     }
 
     const data = await response.json() as { voice_id: string };
     const voiceCloneId = data.voice_id;
 
+    // Get submitter's profile
     const [submitterProfile] = await db
       .select()
       .from(userProfilesTable)
       .where(eq(userProfilesTable.replitUserId, req.user.id))
       .limit(1);
 
-    const filledByUserId = submitterProfile?.id;
-
+    // Mark invite as filled
     const [updated] = await db
       .update(inviteLinksTable)
       .set({
         voiceCloneId,
-        filledByUserId: filledByUserId ?? null,
+        filledByUserId: submitterProfile?.id ?? null,
         filledByName: body.data.displayName,
       })
       .where(eq(inviteLinksTable.uuid, params.data.uuid))
       .returning();
 
+    // Update the project's castJson.voices with the invited voice
+    // Uses the same structure as the cast page: castJson.voices[characterId]
     const [project] = await db
       .select()
       .from(projectsTable)
       .where(eq(projectsTable.id, invite.projectId));
 
     if (project) {
-      const castJson = (project.castJson as Record<string, unknown>) || {};
-      castJson[invite.characterId] = {
-        type: "invite",
-        voiceId: voiceCloneId,
+      const existingCast = (project.castJson as { voices?: Record<string, unknown> }) || {};
+      const voices = existingCast.voices || {};
+      voices[invite.characterId] = {
+        characterId: invite.characterId,
+        voiceType: "invite",
+        elevenLabsVoiceId: voiceCloneId,
+        inviteName: body.data.displayName,
         inviteUuid: params.data.uuid,
-        personName: body.data.displayName,
       };
       await db
         .update(projectsTable)
-        .set({ castJson })
+        .set({ castJson: { ...existingCast, voices } })
         .where(eq(projectsTable.id, invite.projectId));
     }
 
+    // Add to the inviter's Voice Library
     if (invite.inviterProfileId) {
       await db.insert(voiceLibraryTable).values({
         ownerUserId: invite.inviterProfileId,
         personName: body.data.displayName,
-        role: body.data.role ?? invite.characterId,
-        group: body.data.group ?? "Friends",
+        role: invite.characterId,
+        group: "Invited Friends",
         elevenLabsVoiceId: voiceCloneId,
         inviteUuid: params.data.uuid,
       });

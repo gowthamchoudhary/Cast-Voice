@@ -1,4 +1,4 @@
-import { pgTable, text, serial, timestamp, integer, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, timestamp, integer, jsonb, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -26,6 +26,8 @@ export const storiesTable = pgTable("stories", {
   sceneImageUrl: text("scene_image_url"),
   sceneImagePrompt: text("scene_image_prompt"),
   scriptJson: jsonb("script_json").notNull().$type<object>(),
+  isCustom: boolean("is_custom").default(false),
+  rawText: text("raw_text"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -60,8 +62,8 @@ export const inviteLinksTable = pgTable("invite_links", {
   uuid: text("uuid").notNull().unique(),
   inviterProfileId: integer("inviter_profile_id"),
   filledByUserId: integer("filled_by_user_id"),
-  voiceCloneId: text("voice_clone_id"),
   filledByName: text("filled_by_name"),
+  voiceCloneId: text("voice_clone_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -75,11 +77,11 @@ export const voiceLibraryTable = pgTable("voice_library", {
   personName: text("person_name").notNull(),
   role: text("role"),
   group: text("group"),
-  elevenLabsVoiceId: text("elevenlabs_voice_id").notNull(),
+  elevenLabsVoiceId: text("eleven_labs_voice_id").notNull(),
   inviteUuid: text("invite_uuid"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 export const insertVoiceLibrarySchema = createInsertSchema(voiceLibraryTable).omit({ id: true, createdAt: true });
 export type InsertVoiceLibrary = z.infer<typeof insertVoiceLibrarySchema>;
-export type VoiceLibraryEntry = typeof voiceLibraryTable.$inferSelect;
+export type VoiceLibrary = typeof voiceLibraryTable.$inferSelect;

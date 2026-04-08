@@ -179,7 +179,9 @@ export default function Stories() {
             <div className="space-y-8">
               <div className="bg-card border border-border rounded-xl p-6 space-y-4">
                 <h2 className="font-serif text-lg font-semibold text-foreground">Import from URL</h2>
-                <p className="text-muted-foreground text-sm">Paste a URL to a story, article, or script. We'll fetch and parse it automatically.</p>
+                <p className="text-muted-foreground text-sm">
+                  Paste a URL to a story or script. We'll fetch the page and use AI to extract characters, genre, and synopsis — then you can start casting immediately.
+                </p>
                 <div className="flex gap-3">
                   <Input
                     placeholder="https://example.com/my-story"
@@ -190,27 +192,37 @@ export default function Stories() {
                   <Button
                     onClick={() => parseUrl.mutate(customUrl)}
                     disabled={!customUrl || parseUrl.isPending}
+                    className="glow-primary"
                   >
-                    {parseUrl.isPending ? <Spinner className="w-4 h-4" /> : "Import"}
+                    {parseUrl.isPending ? <><Spinner className="w-4 h-4" /> Fetching…</> : "Import with AI"}
                   </Button>
                 </div>
+                <p className="text-xs text-muted-foreground">Up to 8,000 characters of story content are analyzed. For long stories, pasting the text directly gives the best results.</p>
               </div>
 
               <div className="bg-card border border-border rounded-xl p-6 space-y-4">
                 <h2 className="font-serif text-lg font-semibold text-foreground">Paste Story Text</h2>
-                <p className="text-muted-foreground text-sm">Paste your story text and we'll parse it into scenes and characters using AI.</p>
-                <Textarea
-                  placeholder="Paste your story or script here..."
-                  value={customText}
-                  onChange={(e) => setCustomText(e.target.value)}
-                  rows={8}
-                />
+                <p className="text-muted-foreground text-sm">Paste your story text and AI will extract characters, genre, and synopsis automatically.</p>
+                <div className="relative">
+                  <Textarea
+                    placeholder="Paste your story or script here..."
+                    value={customText}
+                    onChange={(e) => setCustomText(e.target.value.slice(0, 8000))}
+                    rows={8}
+                  />
+                  <div className={`absolute bottom-2 right-3 text-xs ${customText.length >= 7500 ? "text-amber-500" : "text-muted-foreground"}`}>
+                    {customText.length.toLocaleString()} / 8,000
+                  </div>
+                </div>
+                {customText.length >= 8000 && (
+                  <p className="text-xs text-amber-500">Story trimmed to 8,000 characters. The AI will analyze this portion.</p>
+                )}
                 <Button
                   onClick={() => parseText.mutate(customText)}
                   disabled={!customText || parseText.isPending}
+                  className="glow-primary"
                 >
-                  {parseText.isPending ? <Spinner className="w-4 h-4 mr-2" /> : null}
-                  Parse Story
+                  {parseText.isPending ? <><Spinner className="w-4 h-4 mr-2" />Analyzing with AI…</> : "Analyze with AI"}
                 </Button>
               </div>
             </div>
