@@ -1,0 +1,138 @@
+The app currently has broken audio generation. 
+Fix the entire generation pipeline to use ONLY 
+ElevenLabs Voice Design API. This is the critical fix.
+
+=== REMOVE ===
+Remove all Google TTS code completely.
+Remove any gTTS, google-tts-api references.
+
+=== VOICE DESIGN FLOW ===
+For EVERY character regardless of how they were cast
+(AI Generate, My Voice, Library, Invite Friend),
+use ElevenLabs Voice Design API to generate their voice.
+
+For AI Generate characters: use the user's description.
+
+For My Voice / Library / Invite Friend characters: 
+auto-generate a description from their character role:
+- Hero: "warm, brave, young adult, determined, clear voice"
+- Villain: "deep, cold, slow, commanding, threatening"  
+- Side Character: "natural, conversational, warm, friendly"
+- Mastermind: "calm, precise, low, authoritative, quiet intensity"
+- Hacker: "fast-talking, energetic, young, slightly nervous"
+- Muscle: "very deep, slow, few words, imposing"
+- Insider: "anxious, shaky, whispering, scared"
+- Guard: "official, suspicious, flat, authoritative"
+- Hero (Lost Kingdom): "young, wondering, earnest, discovering courage"
+- Villain (Lost Kingdom): "theatrical, cold, echoing, dark"
+- Mentor: "aged, warm, slow, wise, gravelly"
+- Loyal Friend: "upbeat, nervous humor, loyal, young"
+- Creature Companion: "rumbling, gentle, non-human, otherworldly"
+- Skeptic: "dismissive, confident, then gradually scared"
+- Scared One: "high pitched, trembling, teenage, panicked"
+- Curious Explorer: "bright, fascinated, quick, then compassionate"
+- Voice in the Dark: "ethereal, hollow, distant, sad, echoing"
+- Captain: "measured, experienced, commanding, steady"
+- AI Assistant: "robotic, flat, neutral, precise, no emotion"
+- Engineer: "practical, gruff, skeptical, working class"
+- Scientist: "excited, breathless, wonder-filled, emotional"
+- Unknown Entity: "distorted, layered, barely human, slow"
+- Planner: "bright, organized, then internally screaming"
+- Late Friend: "breathless, apologetic, casual, warm"
+- Overreactor: "dramatic, loud, full emotion, comedic"
+- Chill One: "relaxed, unbothered, dry humor, slow"
+- Random Stranger: "cheerful, oblivious, friendly"
+
+Voice Design API call:
+POST https://api.elevenlabs.io/v1/voice-generation/generate-voice
+Headers: { "xi-api-key": process.env.ELEVENLABS_API_KEY }
+Body: { 
+  "voice_description": "{description above}",
+  "text": "Hello, I am ready to perform."
+}
+Returns: { voice_id: "..." }
+Store this voice_id for the character.
+
+=== TTS FOR EACH DIALOGUE LINE ===
+POST https://api.elevenlabs.io/v1/text-to-speech/{voice_id}
+Headers: { 
+  "xi-api-key": process.env.ELEVENLABS_API_KEY,
+  "Accept": "audio/mpeg"
+}
+Body: {
+  "text": "{dialogue text}",
+  "model_id": "eleven_multilingual_v2",
+  "voice_settings": {
+    "stability": {line.stability or 0.5},
+    "similarity_boost": 0.85,
+    "style": {
+      panic: 0.9,
+      excited: 0.8, 
+      sad: 0.6,
+      calm: 0.2,
+      nervous: 0.7,
+      default: 0.5
+    }[line.emotion] or 0.5,
+    "use_speaker_boost": true
+  }
+}
+Response is raw audio/mpeg bytes.
+Save to temp file: /tmp/line_{projectId}_{index}.mp3
+
+=== SFX FOR EACH CUE ===
+POST https://api.elevenlabs.io/v1/sound-generation
+Headers: { "xi-api-key": process.env.ELEVENLABS_API_KEY }
+Body: {
+  "text": "{sfx_description from script}",
+  "duration_seconds": 3,
+  "prompt_influence": 0.3
+}
+Save to: /tmp/sfx_{projectId}_{scene}_{index}.mp3
+
+=== FFMPEG MIX ===
+Build concat list in correct order:
+- SFX before scene (if exists)
+- All dialogue lines for that scene in order
+- Next scene SFX, then dialogue, etc.
+
+Write /tmp/concat_{projectId}.txt:
+file '/tmp/sfx_...'
+file '/tmp/line_...'
+...
+
+Run ffmpeg:
+ffmpeg -f concat -safe 0 -i /tmp/concat_{projectId}.txt \
+  -c:a libmp3lame -q:a 2 \
+  /tmp/final_{projectId}.mp3
+
+Store final file, serve at GET /api/audio/{projectId}
+Stream with proper range request support for browser playback.
+Clean up all temp files after storing final.
+
+=== VOICE CLONE GRACEFUL MESSAGE ===
+When a user tries to use "My Voice" or a Library voice 
+that was recorded via invite link, instead of attempting 
+to clone, show this message in the UI:
+
+"🎙️ Voice Cloning Coming Soon — Your voice is saved. 
+We're launching cloning with studio subscriptions soon. 
+Your character will be voiced with a matching AI voice 
+for now."
+
+Then proceed with the auto-generated description above 
+for that character's role.
+
+=== GENERATION STATUS ===
+Show real progress on the generation screen:
+- "Designing [Character Name]'s voice..." per character
+- "Recording line [X] of [Y]..." per dialogue line  
+- "Adding sound effects..." per scene
+- "Mixing final audio..." for ffmpeg step
+- "Your drama is ready!" on completion
+
+Update project status in DB: 
+generating → ready (with final audio URL)
+
+Log every ElevenLabs API call with: 
+endpoint, status code, response time.
+If any call fails, log the full error response body.
