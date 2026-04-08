@@ -190,12 +190,32 @@ router.get("/projects/:id/audio", async (req: Request, res: Response): Promise<v
   const dataUrl = project.finalAudioUrl as string;
   const base64 = dataUrl.replace(/^data:audio\/mpeg;base64,/, "");
   const buffer = Buffer.from(base64, "base64");
+  const total = buffer.length;
 
   res.setHeader("Content-Type", "audio/mpeg");
-  res.setHeader("Content-Length", buffer.length);
-  res.setHeader("Cache-Control", "private, max-age=3600");
   res.setHeader("Accept-Ranges", "bytes");
-  res.end(buffer);
+  res.setHeader("Cache-Control", "private, max-age=3600");
+
+  const rangeHeader = req.headers["range"];
+  if (rangeHeader) {
+    // Parse Range: bytes=start-end
+    const match = rangeHeader.match(/bytes=(\d*)-(\d*)/);
+    if (match) {
+      const start = match[1] ? parseInt(match[1], 10) : 0;
+      const end   = match[2] ? parseInt(match[2], 10) : total - 1;
+      const clampedEnd = Math.min(end, total - 1);
+      const chunkSize  = clampedEnd - start + 1;
+
+      res.setHeader("Content-Range",  `bytes ${start}-${clampedEnd}/${total}`);
+      res.setHeader("Content-Length", chunkSize);
+      res.status(206).end(buffer.slice(start, clampedEnd + 1));
+      return;
+    }
+  }
+
+  // Full response
+  res.setHeader("Content-Length", total);
+  res.status(200).end(buffer);
 });
 
 router.patch("/projects/:id", async (req: Request, res: Response): Promise<void> => {
