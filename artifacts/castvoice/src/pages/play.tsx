@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useLocation } from "wouter";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { useApi } from "@/hooks/use-api";
 import { Spinner } from "@/components/ui/spinner";
@@ -33,6 +33,7 @@ function formatTime(s: number) {
 export default function Play({ projectId }: { projectId: string }) {
   const [, setLocation] = useLocation();
   const api = useApi();
+  const queryClient = useQueryClient();
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -46,7 +47,7 @@ export default function Play({ projectId }: { projectId: string }) {
   });
 
   const p = project as any;
-  const audioUrl = p?.audioUrl;
+  const audioUrl = p?.finalAudioUrl;
   const scenes = p?.story?.scriptJson?.scenes || [];
   const currentSceneData = scenes[currentScene];
 
@@ -98,15 +99,36 @@ export default function Play({ projectId }: { projectId: string }) {
     );
   }
 
+  const regenerate = useMutation({
+    mutationFn: () => api.post(`/api/projects/${projectId}/generate`, {}).then(r => r.json()),
+    onSuccess: () => {
+      setLocation(`/generate/${projectId}`);
+    },
+  });
+
   if (!audioUrl) {
     return (
       <div className="min-h-screen bg-background">
         <Nav />
-        <div className="flex flex-col items-center justify-center py-24 text-center">
+        <div className="flex flex-col items-center justify-center py-24 text-center px-4">
           <div className="text-5xl mb-4">🎭</div>
           <h2 className="font-serif text-2xl text-foreground mb-2">Audio Not Ready</h2>
-          <p className="text-muted-foreground mb-6">The audio drama hasn't been generated yet.</p>
-          <Button onClick={() => setLocation(`/cast/${projectId}`)}>Go to Casting</Button>
+          <p className="text-muted-foreground mb-8 max-w-sm">
+            The drama hasn't been generated yet, or generation ran into an issue. Try generating again.
+          </p>
+          <div className="flex gap-3">
+            <Button
+              onClick={() => regenerate.mutate()}
+              disabled={regenerate.isPending}
+              className="glow-primary"
+            >
+              {regenerate.isPending ? <Spinner className="w-4 h-4 mr-2" /> : null}
+              Generate Again
+            </Button>
+            <Button variant="outline" onClick={() => setLocation(`/cast/${projectId}`)}>
+              Edit Casting
+            </Button>
+          </div>
         </div>
       </div>
     );

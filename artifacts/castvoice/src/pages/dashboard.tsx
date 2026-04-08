@@ -48,10 +48,11 @@ export default function Dashboard() {
   const [, setLocation] = useLocation();
   const api = useApi();
 
-  const { data: projects, isLoading } = useQuery({
+  const { data: rawProjects, isLoading } = useQuery({
     queryKey: ["/api/projects"],
     queryFn: () => api.get("/api/projects").then((r) => r.json()),
   });
+  const projects = Array.isArray(rawProjects) ? rawProjects : [];
 
   return (
     <div className="min-h-screen bg-background">

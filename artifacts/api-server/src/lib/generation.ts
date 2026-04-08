@@ -77,7 +77,7 @@ async function elevenLabsTTS(
       },
       body: JSON.stringify({
         text,
-        model_id: "eleven_multilingual_v2",
+        model_id: "eleven_turbo_v2",
         voice_settings: {
           stability,
           similarity_boost: 0.8,
@@ -199,14 +199,17 @@ export async function generateAudioDrama(projectId: number): Promise<void> {
   }
 
   // Look up owner's voice clone ID for user_clone assignments
+  // project.userId is the numeric profile ID, not the replit user ID
   const [ownerProfile] = await db
     .select()
     .from(userProfilesTable)
-    .where(eq(userProfilesTable.replitUserId, project.userId));
+    .where(eq(userProfilesTable.id, project.userId));
 
   const ownerVoiceCloneId = ownerProfile?.voiceCloneId;
 
-  const castJson = (project.castJson as Record<string, CastEntry>) || {};
+  // castJson is stored as { voices: { [characterId]: CastEntry } }
+  const rawCast = (project.castJson as { voices?: Record<string, CastEntry> }) || {};
+  const castJson: Record<string, CastEntry> = rawCast.voices || {};
   const script = story.scriptJson as { scenes: ScriptScene[] };
   const scenes: ScriptScene[] = script?.scenes || [];
   const storyCharacters = (story.characters as Array<{ id: string; name: string; description: string }>) || [];
