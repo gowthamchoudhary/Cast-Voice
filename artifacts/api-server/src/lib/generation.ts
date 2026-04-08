@@ -57,13 +57,62 @@ async function updateProgress(projectId: number, progress: number, step: string)
     .where(eq(projectsTable.id, projectId));
 }
 
+// ---------------------------------------------------------------------------
+// Free TTS fallback — StreamElements (no key required, mp3 response)
+// Voices: Brian, Amy, Emma, Russell, Joey, Salli, Nicole, Matthew, Aria, Justin
+// ---------------------------------------------------------------------------
+const STREAM_ELEMENTS_VOICES_MALE = ["Brian", "Russell", "Joey", "Matthew", "Justin"];
+const STREAM_ELEMENTS_VOICES_FEMALE = ["Amy", "Emma", "Salli", "Nicole", "Aria"];
+
+function pickFallbackVoice(description: string, characterIndex: number): string {
+  const desc = (description || "").toLowerCase();
+  const isFeminine =
+    desc.includes("female") ||
+    desc.includes("woman") ||
+    desc.includes("girl") ||
+    desc.includes("lady") ||
+    desc.includes("feminine") ||
+    desc.includes("warm") ||
+    desc.includes("gentle");
+
+  if (isFeminine) {
+    return STREAM_ELEMENTS_VOICES_FEMALE[characterIndex % STREAM_ELEMENTS_VOICES_FEMALE.length];
+  }
+  return STREAM_ELEMENTS_VOICES_MALE[characterIndex % STREAM_ELEMENTS_VOICES_MALE.length];
+}
+
+async function fallbackTTS(text: string, voiceName: string): Promise<Buffer | null> {
+  try {
+    const url = `https://api.streamelements.com/kappa/v2/speech?voice=${encodeURIComponent(voiceName)}&text=${encodeURIComponent(text)}`;
+    const response = await fetch(url, {
+      headers: { "User-Agent": "CastVoice/1.0" },
+    });
+    if (!response.ok) {
+      logger.warn({ status: response.status, voiceName }, "Fallback TTS request failed");
+      return null;
+    }
+    const arrayBuffer = await response.arrayBuffer();
+    const buf = Buffer.from(arrayBuffer);
+    if (buf.length < 100) return null; // reject empty/error responses
+    return buf;
+  } catch (err) {
+    logger.error({ err }, "Fallback TTS error");
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// ElevenLabs TTS — returns null on any failure (including 402 quota)
+// ---------------------------------------------------------------------------
+let elevenLabsQuotaExceeded = false; // session-level flag to skip after first 402
+
 async function elevenLabsTTS(
   voiceId: string,
   text: string,
   emotion: string,
   stability: number,
 ): Promise<Buffer | null> {
-  if (!ELEVENLABS_API_KEY) return null;
+  if (!ELEVENLABS_API_KEY || elevenLabsQuotaExceeded) return null;
 
   const style = emotionToStyle(emotion);
 
@@ -88,7 +137,12 @@ async function elevenLabsTTS(
     });
 
     if (!response.ok) {
-      logger.warn({ status: response.status, voiceId, emotion }, "TTS request failed");
+      if (response.status === 402) {
+        elevenLabsQuotaExceeded = true;
+        logger.warn("ElevenLabs quota exceeded — switching to fallback TTS for all remaining lines");
+      } else {
+        logger.warn({ status: response.status, voiceId, emotion }, "TTS request failed");
+      }
       return null;
     }
 
@@ -101,7 +155,7 @@ async function elevenLabsTTS(
 }
 
 async function elevenLabsSFX(description: string): Promise<Buffer | null> {
-  if (!ELEVENLABS_API_KEY) return null;
+  if (!ELEVENLABS_API_KEY || elevenLabsQuotaExceeded) return null;
 
   try {
     const response = await fetch("https://api.elevenlabs.io/v1/sound-generation", {
@@ -119,6 +173,7 @@ async function elevenLabsSFX(description: string): Promise<Buffer | null> {
     });
 
     if (!response.ok) {
+      if (response.status === 402) elevenLabsQuotaExceeded = true;
       logger.warn({ status: response.status }, "SFX request failed");
       return null;
     }
@@ -137,7 +192,7 @@ async function getPollinationsImageUrl(prompt: string): Promise<string> {
 }
 
 async function designVoice(description: string, characterName?: string): Promise<string> {
-  if (!ELEVENLABS_API_KEY) return getDefaultVoice(description);
+  if (!ELEVENLABS_API_KEY || elevenLabsQuotaExceeded) return getDefaultVoice(description);
 
   const previewText = `Hello. I am ${characterName || "a character"}, ready to bring this story to life.`;
 
@@ -180,6 +235,9 @@ function getDefaultVoice(description: string): string {
 export async function generateAudioDrama(projectId: number): Promise<void> {
   logger.info({ projectId }, "Starting audio drama generation");
 
+  // Reset quota flag for each generation run
+  elevenLabsQuotaExceeded = false;
+
   const [project] = await db
     .select()
     .from(projectsTable)
@@ -199,7 +257,6 @@ export async function generateAudioDrama(projectId: number): Promise<void> {
   }
 
   // Look up owner's voice clone ID for user_clone assignments
-  // project.userId is the numeric profile ID, not the replit user ID
   const [ownerProfile] = await db
     .select()
     .from(userProfilesTable)
@@ -219,15 +276,14 @@ export async function generateAudioDrama(projectId: number): Promise<void> {
     charNameToId.set(char.name, char.id);
   }
 
-  // STEP 1: Resolve voices for all characters
+  // STEP 1: Resolve ElevenLabs voices for all characters
   await updateProgress(projectId, 5, "Designing character voices...");
 
-  const voiceMap = new Map<string, string>(); // characterId -> voiceId
+  const voiceMap = new Map<string, string>(); // characterId -> elevenLabsVoiceId (may be undefined if quota exceeded)
 
   for (const char of storyCharacters) {
     const castEntry = castJson[char.id];
     if (!castEntry) {
-      // No cast entry — fall back to AI design from character description
       const voiceId = await designVoice(char.description, char.name);
       voiceMap.set(char.id, voiceId);
       continue;
@@ -241,7 +297,6 @@ export async function generateAudioDrama(projectId: number): Promise<void> {
       }
     } else if (castEntry.voiceType === "ai_designed") {
       if (castEntry.elevenLabsVoiceId) {
-        // Already designed during cast setup
         voiceMap.set(char.id, castEntry.elevenLabsVoiceId);
       } else {
         const voiceId = await designVoice(
@@ -253,7 +308,6 @@ export async function generateAudioDrama(projectId: number): Promise<void> {
     } else if (castEntry.voiceType === "library" && castEntry.elevenLabsVoiceId) {
       voiceMap.set(char.id, castEntry.elevenLabsVoiceId);
     } else if (castEntry.voiceType === "invite") {
-      // Look up the invite to get the cloned voice ID
       if (castEntry.inviteUuid) {
         const [invite] = await db
           .select()
@@ -262,7 +316,6 @@ export async function generateAudioDrama(projectId: number): Promise<void> {
         if (invite?.voiceCloneId) {
           voiceMap.set(char.id, invite.voiceCloneId);
         } else {
-          // Invite not filled yet — use character description to design
           const voiceId = await designVoice(char.description, char.name);
           voiceMap.set(char.id, voiceId);
         }
@@ -276,8 +329,16 @@ export async function generateAudioDrama(projectId: number): Promise<void> {
     }
   }
 
+  // Build a fallback voice name map (StreamElements) indexed by character position
+  const fallbackVoiceMap = new Map<string, string>();
+  storyCharacters.forEach((char, index) => {
+    const castEntry = castJson[char.id];
+    const desc = castEntry?.description || char.description || "";
+    fallbackVoiceMap.set(char.id, pickFallbackVoice(desc, index));
+  });
+
   await updateProgress(projectId, 20, "Writing emotional delivery for each line...");
-  await new Promise(r => setTimeout(r, 800));
+  await new Promise(r => setTimeout(r, 500));
 
   // STEP 2: Generate dialogue audio
   await updateProgress(projectId, 30, "Generating dialogue...");
@@ -294,11 +355,24 @@ export async function generateAudioDrama(projectId: number): Promise<void> {
 
     for (const line of scene.lines) {
       const charId = charNameToId.get(line.character);
-      const voiceId = charId ? voiceMap.get(charId) : undefined;
 
-      if (voiceId && line.text) {
+      if (charId && line.text) {
         const stability = line.stability ?? 0.5;
-        const audioBuffer = await elevenLabsTTS(voiceId, line.text, line.emotion || "neutral", stability);
+        const elevenLabsVoiceId = charId ? voiceMap.get(charId) : undefined;
+
+        // Try ElevenLabs first, fall back to StreamElements if quota exceeded or failed
+        let audioBuffer: Buffer | null = null;
+
+        if (elevenLabsVoiceId && !elevenLabsQuotaExceeded) {
+          audioBuffer = await elevenLabsTTS(elevenLabsVoiceId, line.text, line.emotion || "neutral", stability);
+        }
+
+        if (!audioBuffer) {
+          // ElevenLabs failed or quota exceeded — use free fallback
+          const fallbackVoice = fallbackVoiceMap.get(charId) || "Brian";
+          audioBuffer = await fallbackTTS(line.text, fallbackVoice);
+        }
+
         if (audioBuffer) audioSegments.push(audioBuffer);
       }
 
@@ -338,9 +412,12 @@ export async function generateAudioDrama(projectId: number): Promise<void> {
       const combined = Buffer.concat(audioSegments);
       const base64Audio = combined.toString("base64");
       finalAudioUrl = `data:audio/mpeg;base64,${base64Audio}`;
+      logger.info({ projectId, segmentCount: audioSegments.length, sizeKb: Math.round(combined.length / 1024) }, "Audio mixed successfully");
     } catch (err) {
       logger.error({ err }, "Audio mixing failed");
     }
+  } else {
+    logger.error({ projectId }, "No audio segments generated — all TTS calls failed");
   }
 
   await updateProgress(projectId, 95, "Finalizing your audio drama...");
@@ -349,11 +426,11 @@ export async function generateAudioDrama(projectId: number): Promise<void> {
   await db
     .update(projectsTable)
     .set({
-      status: "ready",
+      status: finalAudioUrl ? "ready" : "error",
       finalAudioUrl,
       sceneImagesJson: sceneImages as unknown as object,
       generationProgress: 100,
-      generationStep: "Complete!",
+      generationStep: finalAudioUrl ? "Complete!" : "Generation failed — all voice services unavailable",
     })
     .where(eq(projectsTable.id, projectId));
 
