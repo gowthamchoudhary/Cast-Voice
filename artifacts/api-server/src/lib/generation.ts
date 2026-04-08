@@ -468,7 +468,7 @@ export async function generateAudioDrama(projectId: number): Promise<void> {
     if (scenes.length === 0) {
       logger.error({ projectId }, "Script generation produced no scenes");
       await db.update(projectsTable).set({
-        status: "error",
+        status: "failed",
         generationStep: "Could not generate a script from your story text. Please try a different story.",
         generationProgress: 100,
       }).where(eq(projectsTable.id, projectId));
@@ -502,7 +502,7 @@ export async function generateAudioDrama(projectId: number): Promise<void> {
     } catch (err: any) {
       logger.error({ err: err?.message, characterName: char.name }, "Voice design failed for character");
       await db.update(projectsTable).set({
-        status: "error",
+        status: "failed",
         generationStep: `Voice design failed for ${char.name}: ${err?.message || "Unknown error"}`,
         generationProgress: 100,
       }).where(eq(projectsTable.id, projectId));
@@ -564,7 +564,7 @@ export async function generateAudioDrama(projectId: number): Promise<void> {
         logger.error({ err: err?.message, charId, line: line.text.slice(0, 60) }, "TTS failed for line");
         await cleanupTempFiles(projectId, orderedTempFiles);
         await db.update(projectsTable).set({
-          status: "error",
+          status: "failed",
           generationStep: `TTS failed on line ${processedLines}: ${err?.message || "Unknown error"}`,
           generationProgress: 100,
         }).where(eq(projectsTable.id, projectId));
@@ -603,7 +603,7 @@ export async function generateAudioDrama(projectId: number): Promise<void> {
     } catch (err: any) {
       logger.error({ err: err?.message }, "ffmpeg merge failed");
       await db.update(projectsTable).set({
-        status: "error",
+        status: "failed",
         generationStep: `Audio merge failed: ${err?.message || "Unknown error"}`,
         generationProgress: 100,
       }).where(eq(projectsTable.id, projectId));
@@ -612,7 +612,7 @@ export async function generateAudioDrama(projectId: number): Promise<void> {
   } else {
     logger.error({ projectId }, "No audio files generated");
     await db.update(projectsTable).set({
-      status: "error",
+      status: "failed",
       generationStep: "No audio could be generated — all TTS calls failed",
       generationProgress: 100,
     }).where(eq(projectsTable.id, projectId));
