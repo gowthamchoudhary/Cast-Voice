@@ -57,7 +57,8 @@ export default function Play({ projectId }: { projectId: string }) {
   });
 
   const p = project as any;
-  const audioUrl = p?.finalAudioUrl;
+  // Audio is served via a dedicated endpoint instead of an embedded data URL
+  const audioUrl = p?.hasAudio ? `/api/projects/${projectId}/audio` : null;
   const scenes = p?.story?.scriptJson?.scenes || [];
   const currentSceneData = scenes[currentScene];
 

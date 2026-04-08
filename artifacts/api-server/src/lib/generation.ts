@@ -254,16 +254,44 @@ async function designVoice(description: string, characterName?: string): Promise
   }
 }
 
+// Valid ElevenLabs pre-made voice IDs (verified 2025)
+const EL_VOICES = {
+  GEORGE:  "JBFqnCBsd6RMkjVDRZzb", // Warm, Captivating Storyteller
+  CHARLIE: "IKne3meq5aSn9XLyUdCD", // Deep, Confident, Energetic
+  BRIAN:   "nPczCjzI2devNBz1zQrb", // Deep, Resonant and Comforting
+  ADAM:    "pNInz6obpgDQGcFmaJgB", // Dominant, Firm
+  HARRY:   "SOYHLrjzK2X1ezoPC6cr", // Fierce Warrior
+  CALLUM:  "N2lVS1w4EtoT3dr4eOWO", // Husky Trickster
+  DANIEL:  "onwK4e9ZLuTAKqWW03F9", // Steady Broadcaster
+  BILL:    "pqHfZKP75CvOlQylNhV4", // Wise, Mature, Balanced
+  ROGER:   "CwhRBWXzGAHq8TQ4Fs17", // Laid-Back, Casual, Resonant
+  SARAH:   "EXAVITQu4vr4xnSDxMaL", // Mature, Reassuring, Confident
+  ALICE:   "Xb7hH8MSUJpSbSDYk0k2", // Clear, Engaging Educator
+  MATILDA: "XrExE9yKIg1WjnnlVkGX", // Knowledgeable, Professional
+  JESSICA: "cgSgspJ2msm6clMCkdW9", // Playful, Bright, Warm
+  LAURA:   "FGY2WhTYpPnrIDTdsKH5", // Enthusiast, Quirky Attitude
+  LILY:    "pFZP5JQG7iQjIQuC4Bku", // Velvety Actress
+  BELLA:   "hpp4J3VqNfWAUOO0d1Us", // Professional, Bright, Warm
+};
+
 function getDefaultVoice(description: string): string {
   const desc = (description || "").toLowerCase();
-  if (desc.includes("deep") || desc.includes("gruff") || desc.includes("baritone")) return "pNInz6obpgDQGcFmaJgB";
-  if (desc.includes("warm") || desc.includes("gentle") || desc.includes("feminine")) return "EXAVITQu4vr4xnSDxMaL";
-  if (desc.includes("young") || desc.includes("teen") || desc.includes("energetic")) return "jBpfuIE2acCo8z3wKNLl";
-  if (desc.includes("command") || desc.includes("leader") || desc.includes("villain")) return "VR6AewLTigWG4xSOukaG";
-  if (desc.includes("nervous") || desc.includes("scared") || desc.includes("timid")) return "oWAxZDx7w5VEj9dCyTzz";
-  if (desc.includes("playful") || desc.includes("fun") || desc.includes("cheerful")) return "jsCqWAovK2LkecY7zXl4";
-  if (desc.includes("ethereal") || desc.includes("mystic") || desc.includes("mysterious")) return "XB0fDUnXU5powFXDhCwa";
-  return "pNInz6obpgDQGcFmaJgB";
+  if (desc.includes("deep") || desc.includes("gruff") || desc.includes("baritone") || desc.includes("dominant")) return EL_VOICES.BRIAN;
+  if (desc.includes("wise") || desc.includes("elder") || desc.includes("old") || desc.includes("mature")) return EL_VOICES.BILL;
+  if (desc.includes("villain") || desc.includes("dark") || desc.includes("menacing")) return EL_VOICES.HARRY;
+  if (desc.includes("hero") || desc.includes("leader") || desc.includes("command") || desc.includes("confident")) return EL_VOICES.CHARLIE;
+  if (desc.includes("storytell") || desc.includes("narrator") || desc.includes("warm") && desc.includes("male")) return EL_VOICES.GEORGE;
+  if (desc.includes("broadcaster") || desc.includes("reporter") || desc.includes("steady")) return EL_VOICES.DANIEL;
+  if (desc.includes("feminine") || desc.includes("female") || desc.includes("woman") || desc.includes("lady")) return EL_VOICES.SARAH;
+  if (desc.includes("playful") || desc.includes("fun") || desc.includes("bright") || desc.includes("cheerful")) return EL_VOICES.JESSICA;
+  if (desc.includes("young") || desc.includes("teen") || desc.includes("energetic")) return EL_VOICES.LAURA;
+  if (desc.includes("gentle") || desc.includes("soft") || desc.includes("warm")) return EL_VOICES.ALICE;
+  if (desc.includes("mysterious") || desc.includes("ethereal") || desc.includes("mystic")) return EL_VOICES.CALLUM;
+  if (desc.includes("professional") || desc.includes("academic") || desc.includes("smart")) return EL_VOICES.MATILDA;
+  // default — rotate through a few voices based on hash of description to add variety
+  const fallbacks = [EL_VOICES.GEORGE, EL_VOICES.SARAH, EL_VOICES.ROGER, EL_VOICES.ALICE, EL_VOICES.BRIAN];
+  const hash = [...(description || "default")].reduce((acc, c) => acc + c.charCodeAt(0), 0);
+  return fallbacks[hash % fallbacks.length];
 }
 
 // ---------------------------------------------------------------------------

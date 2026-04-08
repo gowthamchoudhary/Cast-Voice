@@ -141,8 +141,13 @@ router.get("/projects/:id", async (req: Request, res: Response): Promise<void> =
     .from(storiesTable)
     .where(eq(storiesTable.id, project.storyId));
 
+  // Exclude finalAudioUrl from this response — audio is served via /api/projects/:id/audio
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { finalAudioUrl: _omit, ...projectWithoutAudio } = project;
+
   res.json({
-    ...project,
+    ...projectWithoutAudio,
+    hasAudio: !!project.finalAudioUrl,
     story: story
       ? {
           id: story.id,
@@ -155,6 +160,42 @@ router.get("/projects/:id", async (req: Request, res: Response): Promise<void> =
         }
       : null,
   });
+});
+
+// Dedicated audio streaming endpoint — returns raw MP3 bytes so the browser
+// can stream it rather than loading a 1MB+ data URL embedded in JSON
+router.get("/projects/:id/audio", async (req: Request, res: Response): Promise<void> => {
+  if (!req.isAuthenticated()) {
+    res.status(401).end();
+    return;
+  }
+
+  const params = GetProjectParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).end();
+    return;
+  }
+
+  const [project] = await db
+    .select({ finalAudioUrl: projectsTable.finalAudioUrl, userId: projectsTable.userId })
+    .from(projectsTable)
+    .where(eq(projectsTable.id, params.data.id));
+
+  if (!project || !project.finalAudioUrl) {
+    res.status(404).end();
+    return;
+  }
+
+  // Strip the data URL prefix and decode base64 to binary
+  const dataUrl = project.finalAudioUrl as string;
+  const base64 = dataUrl.replace(/^data:audio\/mpeg;base64,/, "");
+  const buffer = Buffer.from(base64, "base64");
+
+  res.setHeader("Content-Type", "audio/mpeg");
+  res.setHeader("Content-Length", buffer.length);
+  res.setHeader("Cache-Control", "private, max-age=3600");
+  res.setHeader("Accept-Ranges", "bytes");
+  res.end(buffer);
 });
 
 router.patch("/projects/:id", async (req: Request, res: Response): Promise<void> => {
