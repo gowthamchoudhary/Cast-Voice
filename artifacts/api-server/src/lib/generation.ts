@@ -108,17 +108,19 @@ async function fallbackTTS(text: string, locale: string): Promise<Buffer | null>
         headers: { "User-Agent": "Mozilla/5.0 (compatible; CastVoice/1.0)" },
       }, 10000);
       if (!response.ok) {
-        logger.warn({ status: response.status, locale }, "Google TTS request failed");
+        const body = await response.text().catch(() => "");
+        logger.warn({ status: response.status, locale, body: body.slice(0, 200) }, "Google TTS request failed");
         continue;
       }
       const arrayBuffer = await response.arrayBuffer();
       const buf = Buffer.from(arrayBuffer);
+      logger.info({ locale, bytes: buf.length }, "Google TTS chunk received");
       if (buf.length > 100) buffers.push(buf);
     } catch (err: any) {
       if (err?.name === "AbortError") {
-        logger.warn({ locale }, "Google TTS timed out");
+        logger.warn({ locale, chunk }, "Google TTS timed out");
       } else {
-        logger.error({ err }, "Google TTS error");
+        logger.error({ err: { message: err?.message, code: err?.code, name: err?.name } }, "Google TTS error");
       }
     }
   }
@@ -264,6 +266,75 @@ function getDefaultVoice(description: string): string {
   return "pNInz6obpgDQGcFmaJgB";
 }
 
+// ---------------------------------------------------------------------------
+// Script generation — converts raw story text + characters into dialogue scenes
+// ---------------------------------------------------------------------------
+async function generateScriptFromText(
+  rawText: string,
+  characters: Array<{ id: string; name: string; description: string }>,
+  title: string,
+): Promise<ScriptScene[]> {
+  const charList = characters.map(c => `- ${c.name}: ${c.description}`).join("\n");
+  const prompt = `You are a dramatic script writer. Convert the following story into a radio drama script with 2-4 scenes.
+
+Story title: "${title}"
+
+Characters:
+${charList}
+
+Story text:
+${rawText.slice(0, 6000)}
+
+Write a script where the characters have natural dialogue that dramatizes the key moments of the story.
+Each scene should have 4-8 lines of dialogue.
+
+Respond ONLY with valid JSON in this exact format (no markdown, no extra text):
+{
+  "scenes": [
+    {
+      "scene": 1,
+      "scene_description": "Brief scene description for imagery",
+      "sfx_before": "optional sound effect description or omit",
+      "lines": [
+        {
+          "character": "EXACT character name from the list above",
+          "emotion": "one word emotion",
+          "stability": 0.5,
+          "text": "What the character says"
+        }
+      ]
+    }
+  ]
+}`;
+
+  try {
+    const resp = await fetchWithTimeout("https://text.pollinations.ai/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        messages: [{ role: "user", content: prompt }],
+        model: "openai",
+        jsonMode: true,
+      }),
+    }, 40000);
+
+    if (!resp.ok) {
+      logger.warn({ status: resp.status }, "Script generation AI call failed");
+      return [];
+    }
+
+    const raw = await resp.text();
+    const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
+    const parsed = JSON.parse(cleaned);
+    if (!Array.isArray(parsed.scenes)) return [];
+    logger.info({ sceneCount: parsed.scenes.length }, "Script generated from story text");
+    return parsed.scenes;
+  } catch (err) {
+    logger.error({ err }, "Script generation failed");
+    return [];
+  }
+}
+
 export async function generateAudioDrama(projectId: number): Promise<void> {
   logger.info({ projectId }, "Starting audio drama generation");
 
@@ -300,8 +371,32 @@ export async function generateAudioDrama(projectId: number): Promise<void> {
   const rawCast = (project.castJson as { voices?: Record<string, CastEntry> }) || {};
   const castJson: Record<string, CastEntry> = rawCast.voices || {};
   const script = story.scriptJson as { scenes: ScriptScene[] };
-  const scenes: ScriptScene[] = script?.scenes || [];
+  let scenes: ScriptScene[] = script?.scenes || [];
   const storyCharacters = (story.characters as Array<{ id: string; name: string; description: string }>) || [];
+
+  // If scenes is empty (user uploaded raw story text), generate dialogue script now
+  if (scenes.length === 0) {
+    const rawText = (story.scriptJson as { rawText?: string })?.rawText || (story as any).rawText || "";
+    if (rawText.length > 50) {
+      await updateProgress(projectId, 8, "Writing dialogue script from your story...");
+      scenes = await generateScriptFromText(rawText, storyCharacters, story.title);
+      if (scenes.length > 0) {
+        // Save generated scenes back into the story so next generation is instant
+        await db.update(storiesTable)
+          .set({ scriptJson: { ...script, scenes } })
+          .where(eq(storiesTable.id, story.id));
+      }
+    }
+    if (scenes.length === 0) {
+      logger.error({ projectId }, "Script generation produced no scenes");
+      await db.update(projectsTable).set({
+        status: "error",
+        generationStep: "Could not generate a script from your story text. Please try a different story.",
+        generationProgress: 100,
+      }).where(eq(projectsTable.id, projectId));
+      return;
+    }
+  }
 
   const charNameToId = new Map<string, string>();
   for (const char of storyCharacters) {
