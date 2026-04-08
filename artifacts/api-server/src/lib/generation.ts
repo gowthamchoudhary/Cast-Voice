@@ -58,13 +58,13 @@ async function updateProgress(projectId: number, progress: number, step: string)
 }
 
 // ---------------------------------------------------------------------------
-// Free TTS fallback — StreamElements (no key required, mp3 response)
-// Voices: Brian, Amy, Emma, Russell, Joey, Salli, Nicole, Matthew, Aria, Justin
+// Free TTS fallback — Google Translate TTS (no key required, mp3 response)
+// Different locales give slightly different voice tones for character variety
 // ---------------------------------------------------------------------------
-const STREAM_ELEMENTS_VOICES_MALE = ["Brian", "Russell", "Joey", "Matthew", "Justin"];
-const STREAM_ELEMENTS_VOICES_FEMALE = ["Amy", "Emma", "Salli", "Nicole", "Aria"];
+const FALLBACK_LOCALES_NEUTRAL = ["en-US", "en-GB", "en-AU", "en-IN"];
+const FALLBACK_LOCALES_FEMALE = ["en-GB", "en-AU", "en-IN", "en-US"];
 
-function pickFallbackVoice(description: string, characterIndex: number): string {
+function pickFallbackLocale(description: string, characterIndex: number): string {
   const desc = (description || "").toLowerCase();
   const isFeminine =
     desc.includes("female") ||
@@ -75,10 +75,8 @@ function pickFallbackVoice(description: string, characterIndex: number): string 
     desc.includes("warm") ||
     desc.includes("gentle");
 
-  if (isFeminine) {
-    return STREAM_ELEMENTS_VOICES_FEMALE[characterIndex % STREAM_ELEMENTS_VOICES_FEMALE.length];
-  }
-  return STREAM_ELEMENTS_VOICES_MALE[characterIndex % STREAM_ELEMENTS_VOICES_MALE.length];
+  const pool = isFeminine ? FALLBACK_LOCALES_FEMALE : FALLBACK_LOCALES_NEUTRAL;
+  return pool[characterIndex % pool.length];
 }
 
 function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
@@ -87,26 +85,44 @@ function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Pr
   return fetch(url, { ...init, signal: controller.signal }).finally(() => clearTimeout(timer));
 }
 
-async function fallbackTTS(text: string, voiceName: string): Promise<Buffer | null> {
-  try {
-    const url = `https://api.streamelements.com/kappa/v2/speech?voice=${encodeURIComponent(voiceName)}&text=${encodeURIComponent(text)}`;
-    const response = await fetchWithTimeout(url, { headers: { "User-Agent": "CastVoice/1.0" } }, 8000);
-    if (!response.ok) {
-      logger.warn({ status: response.status, voiceName }, "Fallback TTS request failed");
-      return null;
-    }
-    const arrayBuffer = await response.arrayBuffer();
-    const buf = Buffer.from(arrayBuffer);
-    if (buf.length < 100) return null; // reject empty/error responses
-    return buf;
-  } catch (err: any) {
-    if (err?.name === "AbortError") {
-      logger.warn({ voiceName }, "Fallback TTS timed out");
+async function fallbackTTS(text: string, locale: string): Promise<Buffer | null> {
+  // Split long text into <=200-char chunks (Google TTS limit)
+  const chunks: string[] = [];
+  const words = text.split(" ");
+  let current = "";
+  for (const word of words) {
+    if ((current + " " + word).trim().length > 195) {
+      if (current) chunks.push(current.trim());
+      current = word;
     } else {
-      logger.error({ err }, "Fallback TTS error");
+      current = (current + " " + word).trim();
     }
-    return null;
   }
+  if (current) chunks.push(current);
+
+  const buffers: Buffer[] = [];
+  for (const chunk of chunks) {
+    try {
+      const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(chunk)}&tl=${encodeURIComponent(locale)}&client=tw-ob`;
+      const response = await fetchWithTimeout(url, {
+        headers: { "User-Agent": "Mozilla/5.0 (compatible; CastVoice/1.0)" },
+      }, 10000);
+      if (!response.ok) {
+        logger.warn({ status: response.status, locale }, "Google TTS request failed");
+        continue;
+      }
+      const arrayBuffer = await response.arrayBuffer();
+      const buf = Buffer.from(arrayBuffer);
+      if (buf.length > 100) buffers.push(buf);
+    } catch (err: any) {
+      if (err?.name === "AbortError") {
+        logger.warn({ locale }, "Google TTS timed out");
+      } else {
+        logger.error({ err }, "Google TTS error");
+      }
+    }
+  }
+  return buffers.length > 0 ? Buffer.concat(buffers) : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -345,12 +361,12 @@ export async function generateAudioDrama(projectId: number): Promise<void> {
     }
   }
 
-  // Build a fallback voice name map (StreamElements) indexed by character position
-  const fallbackVoiceMap = new Map<string, string>();
+  // Build a fallback locale map (Google TTS) indexed by character position
+  const fallbackLocaleMap = new Map<string, string>();
   storyCharacters.forEach((char, index) => {
     const castEntry = castJson[char.id];
     const desc = castEntry?.description || char.description || "";
-    fallbackVoiceMap.set(char.id, pickFallbackVoice(desc, index));
+    fallbackLocaleMap.set(char.id, pickFallbackLocale(desc, index));
   });
 
   await updateProgress(projectId, 20, "Writing emotional delivery for each line...");
@@ -384,9 +400,9 @@ export async function generateAudioDrama(projectId: number): Promise<void> {
         }
 
         if (!audioBuffer) {
-          // ElevenLabs failed or quota exceeded — use free fallback
-          const fallbackVoice = fallbackVoiceMap.get(charId) || "Brian";
-          audioBuffer = await fallbackTTS(line.text, fallbackVoice);
+          // ElevenLabs failed or quota exceeded — use Google TTS fallback
+          const fallbackLocale = fallbackLocaleMap.get(charId) || "en-US";
+          audioBuffer = await fallbackTTS(line.text, fallbackLocale);
         }
 
         if (audioBuffer) audioSegments.push(audioBuffer);
