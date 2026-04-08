@@ -171,38 +171,48 @@ function descriptionFromRole(roleOrDescription: string): string {
   return roleOrDescription;
 }
 
-function preMadeVoiceFromDescription(description: string, charIndex: number): string {
+function preMadeVoiceFromDescription(description: string, charIndex: number, usedVoiceIds?: Set<string>): string {
   const desc = (description || "").toLowerCase();
+
+  const pick = (voiceId: string): string => {
+    if (!usedVoiceIds || !usedVoiceIds.has(voiceId)) return voiceId;
+    // Voice already used — find the next unused voice from the pool
+    const unused = FALLBACK_VOICE_POOL.filter(v => !usedVoiceIds.has(v));
+    if (unused.length > 0) return unused[charIndex % unused.length];
+    // All pool voices used — rotate pool ignoring uniqueness
+    return FALLBACK_VOICE_POOL[charIndex % FALLBACK_VOICE_POOL.length];
+  };
 
   // Role name match first
   for (const [role, voiceId] of Object.entries(ROLE_TO_VOICE)) {
-    if (desc.includes(role.toLowerCase())) return voiceId;
+    if (desc.includes(role.toLowerCase())) return pick(voiceId);
   }
 
   // Keyword-based selection
-  if (desc.includes("villain") || desc.includes("dark") || desc.includes("menacing") || desc.includes("threatening")) return EL_VOICES.HARRY;
-  if (desc.includes("hero") || desc.includes("brave") || desc.includes("determined") || desc.includes("leader")) return EL_VOICES.CHARLIE;
-  if (desc.includes("deep") || desc.includes("gruff") || desc.includes("imposing") || desc.includes("baritone")) return EL_VOICES.BRIAN;
-  if (desc.includes("wise") || desc.includes("elder") || desc.includes("mentor") || desc.includes("aged") || desc.includes("gravelly")) return EL_VOICES.BILL;
-  if (desc.includes("mysterious") || desc.includes("ethereal") || desc.includes("hollow") || desc.includes("echoing")) return EL_VOICES.CALLUM;
-  if (desc.includes("narrator") || desc.includes("storytell") || desc.includes("cinematic") || desc.includes("resonant")) return EL_VOICES.GEORGE;
-  if (desc.includes("steady") || desc.includes("captain") || desc.includes("official") || desc.includes("authoritative")) return EL_VOICES.DANIEL;
-  if (desc.includes("laid-back") || desc.includes("casual") || desc.includes("chill") || desc.includes("relaxed")) return EL_VOICES.ROGER;
-  if (desc.includes("female") || desc.includes("woman") || desc.includes("reassuring") || desc.includes("mature")) return EL_VOICES.SARAH;
-  if (desc.includes("playful") || desc.includes("bright") || desc.includes("warm") || desc.includes("friendly")) return EL_VOICES.JESSICA;
-  if (desc.includes("young") || desc.includes("energetic") || desc.includes("fast") || desc.includes("excited")) return EL_VOICES.LAURA;
-  if (desc.includes("professional") || desc.includes("precise") || desc.includes("robotic") || desc.includes("academic")) return EL_VOICES.MATILDA;
-  if (desc.includes("gentle") || desc.includes("clear") || desc.includes("soft") || desc.includes("educator")) return EL_VOICES.ALICE;
-  if (desc.includes("velvety") || desc.includes("actress") || desc.includes("anxious") || desc.includes("trembling")) return EL_VOICES.LILY;
+  if (desc.includes("villain") || desc.includes("dark") || desc.includes("menacing") || desc.includes("threatening")) return pick(EL_VOICES.HARRY);
+  if (desc.includes("hero") || desc.includes("brave") || desc.includes("determined") || desc.includes("leader")) return pick(EL_VOICES.CHARLIE);
+  if (desc.includes("deep") || desc.includes("gruff") || desc.includes("imposing") || desc.includes("baritone")) return pick(EL_VOICES.BRIAN);
+  if (desc.includes("wise") || desc.includes("elder") || desc.includes("mentor") || desc.includes("aged") || desc.includes("gravelly")) return pick(EL_VOICES.BILL);
+  if (desc.includes("mysterious") || desc.includes("ethereal") || desc.includes("hollow") || desc.includes("echoing")) return pick(EL_VOICES.CALLUM);
+  if (desc.includes("narrator") || desc.includes("storytell") || desc.includes("cinematic") || desc.includes("resonant")) return pick(EL_VOICES.GEORGE);
+  if (desc.includes("steady") || desc.includes("captain") || desc.includes("official") || desc.includes("authoritative")) return pick(EL_VOICES.DANIEL);
+  if (desc.includes("laid-back") || desc.includes("casual") || desc.includes("chill") || desc.includes("relaxed")) return pick(EL_VOICES.ROGER);
+  if (desc.includes("female") || desc.includes("woman") || desc.includes("reassuring") || desc.includes("mature")) return pick(EL_VOICES.SARAH);
+  if (desc.includes("playful") || desc.includes("bright") || desc.includes("warm") || desc.includes("friendly")) return pick(EL_VOICES.JESSICA);
+  if (desc.includes("young") || desc.includes("energetic") || desc.includes("fast") || desc.includes("excited")) return pick(EL_VOICES.LAURA);
+  if (desc.includes("professional") || desc.includes("precise") || desc.includes("robotic") || desc.includes("academic")) return pick(EL_VOICES.MATILDA);
+  if (desc.includes("gentle") || desc.includes("clear") || desc.includes("soft") || desc.includes("educator")) return pick(EL_VOICES.ALICE);
+  if (desc.includes("velvety") || desc.includes("actress") || desc.includes("anxious") || desc.includes("trembling")) return pick(EL_VOICES.LILY);
 
   // Default: rotate through pool by character index for variety
-  return FALLBACK_VOICE_POOL[charIndex % FALLBACK_VOICE_POOL.length];
+  return pick(FALLBACK_VOICE_POOL[charIndex % FALLBACK_VOICE_POOL.length]);
 }
 
 async function designVoiceForCharacter(
   char: { id: string; name: string; description: string },
   castEntry: CastEntry | undefined,
   charIndex: number,
+  usedVoiceIds: Set<string>,
 ): Promise<string> {
   if (!ELEVENLABS_API_KEY) throw new Error("ELEVENLABS_API_KEY not set");
 
@@ -240,7 +250,7 @@ async function designVoiceForCharacter(
     if (!response.ok) {
       const errorBody = await response.text().catch(() => "");
       logger.warn({ endpoint, status: response.status, responseTimeMs, errorBody, characterName: char.name }, "Voice design API unavailable — using pre-made voice");
-      const fallback = preMadeVoiceFromDescription(voiceDescription, charIndex);
+      const fallback = preMadeVoiceFromDescription(voiceDescription, charIndex, usedVoiceIds);
       logger.info({ characterName: char.name, fallbackVoiceId: fallback }, "Pre-made voice selected");
       return fallback;
     }
@@ -251,12 +261,12 @@ async function designVoiceForCharacter(
     if (data.voice_id) return data.voice_id;
 
     logger.warn({ characterName: char.name }, "Voice design returned no voice_id — using pre-made voice");
-    return preMadeVoiceFromDescription(voiceDescription, charIndex);
+    return preMadeVoiceFromDescription(voiceDescription, charIndex, usedVoiceIds);
 
   } catch (err: any) {
     const responseTimeMs = Date.now() - t0;
     logger.warn({ err: err?.message, responseTimeMs, characterName: char.name }, "Voice design request failed — using pre-made voice");
-    return preMadeVoiceFromDescription(voiceDescription, charIndex);
+    return preMadeVoiceFromDescription(voiceDescription, charIndex, usedVoiceIds);
   }
 }
 
@@ -483,7 +493,7 @@ Excerpt:
 ${storyChunk}
 
 Respond ONLY with valid JSON (no markdown):
-{"scenes":[{"scene":1,"scene_description":"brief description","lines":[{"character":"Name","emotion":"neutral","stability":0.5,"text":"dialogue"}]}]}`;
+{"scenes":[{"scene":1,"scene_description":"brief vivid description","sfx_before":"3-6 word ambient sound effect description e.g. crackling campfire night insects","lines":[{"character":"Name","emotion":"neutral","stability":0.5,"text":"dialogue"}]}]}`;
 
   try {
     const resp = await fetchWithTimeout("https://text.pollinations.ai/", {
@@ -519,6 +529,42 @@ Respond ONLY with valid JSON (no markdown):
 
   logger.info("Attempting dialogue extraction from raw story text");
   return extractDialogueFromRawText(rawText, characters);
+}
+
+const SFX_SCENE_MAP: Array<{ keywords: string[]; sfx: string }> = [
+  { keywords: ["campfire", "camp", "fire", "embers", "bonfire"], sfx: "crackling campfire, night insects, gentle wind" },
+  { keywords: ["tavern", "inn", "pub", "bar", "alehouse"], sfx: "busy tavern ambiance, clinking mugs, distant laughter" },
+  { keywords: ["forest", "woods", "jungle", "trees", "woodland"], sfx: "forest ambiance, birdsong, rustling leaves" },
+  { keywords: ["battle", "fight", "combat", "war", "clash", "sword", "attack"], sfx: "clashing swords, battle cries, distant thunder of combat" },
+  { keywords: ["dungeon", "cave", "underground", "crypt", "cellar"], sfx: "dripping water, echoing footsteps, distant rumble" },
+  { keywords: ["castle", "palace", "throne", "hall", "court"], sfx: "grand hall ambiance, torch flames, distant echo" },
+  { keywords: ["market", "bazaar", "village", "town", "city", "street"], sfx: "bustling market crowd, footsteps on cobblestones" },
+  { keywords: ["ship", "sea", "ocean", "boat", "port", "dock", "waves"], sfx: "ocean waves, creaking ship timbers, seagulls" },
+  { keywords: ["storm", "rain", "thunder", "lightning"], sfx: "thunderstorm, heavy rain, distant lightning cracks" },
+  { keywords: ["temple", "shrine", "sacred", "ritual", "prayer"], sfx: "echoing temple bells, soft chanting, burning incense" },
+  { keywords: ["space", "starship", "galaxy", "cosmos", "orbit"], sfx: "deep space ambient hum, console beeps, distant engines" },
+  { keywords: ["laboratory", "lab", "experiment", "science"], sfx: "laboratory hum, bubbling liquids, electronic beeps" },
+  { keywords: ["mansion", "estate", "garden", "parlor"], sfx: "clock ticking, distant piano, quiet atmosphere" },
+  { keywords: ["desert", "sand", "dunes", "wasteland"], sfx: "howling desert wind, sand shifting, dry heat atmosphere" },
+  { keywords: ["mountain", "cliff", "peak", "highland"], sfx: "mountain wind, distant eagle cry, echo" },
+  { keywords: ["library", "archives", "study", "books"], sfx: "pages turning, quiet study ambiance, distant clock" },
+];
+
+const GENRE_SFX: Record<number, string> = {
+  1: "dramatic scene transition, subtle orchestral swell",
+  2: "tense atmosphere, low drone, shifting air",
+  3: "calm interlude, soft ambient music",
+  4: "climactic buildup, rising tension",
+};
+
+function autoSfxForScene(sceneDescription: string, sceneIdx: number): string | null {
+  const lower = (sceneDescription || "").toLowerCase();
+  for (const entry of SFX_SCENE_MAP) {
+    if (entry.keywords.some(k => lower.includes(k))) {
+      return entry.sfx;
+    }
+  }
+  return GENRE_SFX[sceneIdx + 1] ?? "cinematic ambient atmosphere, subtle background score";
 }
 
 export async function generateAudioDrama(projectId: number): Promise<void> {
@@ -583,6 +629,7 @@ export async function generateAudioDrama(projectId: number): Promise<void> {
   //   - user_clone / library / invite → use role-based description from ROLE_VOICE_DESCRIPTIONS
   //   - no cast entry → use character.description from story
   const voiceMap = new Map<string, string>();
+  const usedVoiceIds = new Set<string>();
 
   for (let i = 0; i < storyCharacters.length; i++) {
     const char = storyCharacters[i];
@@ -591,8 +638,9 @@ export async function generateAudioDrama(projectId: number): Promise<void> {
     await updateProgress(projectId, progress, `Designing ${char.name}'s voice...`);
 
     try {
-      const voiceId = await designVoiceForCharacter(char, castEntry, i);
+      const voiceId = await designVoiceForCharacter(char, castEntry, i, usedVoiceIds);
       voiceMap.set(char.id, voiceId);
+      usedVoiceIds.add(voiceId);
     } catch (err: any) {
       logger.error({ err: err?.message, characterName: char.name }, "Voice design failed for character");
       await db.update(projectsTable).set({
@@ -603,6 +651,13 @@ export async function generateAudioDrama(projectId: number): Promise<void> {
       return;
     }
   }
+
+  // Auto-inject SFX descriptions for scenes that don't have one
+  scenes = scenes.map((scene, idx) => {
+    if (scene.sfx_before) return scene;
+    const sfx = autoSfxForScene(scene.scene_description, idx);
+    return sfx ? { ...scene, sfx_before: sfx } : scene;
+  });
 
   // STEP 2: Generate audio files for each line and SFX
   const orderedTempFiles: string[] = [];
