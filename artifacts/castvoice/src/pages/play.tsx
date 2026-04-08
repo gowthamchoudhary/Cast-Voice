@@ -46,6 +46,14 @@ export default function Play({ projectId }: { projectId: string }) {
     queryFn: () => api.get(`/api/projects/${projectId}`).then((r) => r.json()),
   });
 
+  // Must be declared before any early returns to follow Rules of Hooks
+  const regenerate = useMutation({
+    mutationFn: () => api.post(`/api/projects/${projectId}/generate`, {}).then(r => r.json()),
+    onSuccess: () => {
+      setLocation(`/generate/${projectId}`);
+    },
+  });
+
   const p = project as any;
   const audioUrl = p?.finalAudioUrl;
   const scenes = p?.story?.scriptJson?.scenes || [];
@@ -98,13 +106,6 @@ export default function Play({ projectId }: { projectId: string }) {
       </div>
     );
   }
-
-  const regenerate = useMutation({
-    mutationFn: () => api.post(`/api/projects/${projectId}/generate`, {}).then(r => r.json()),
-    onSuccess: () => {
-      setLocation(`/generate/${projectId}`);
-    },
-  });
 
   if (!audioUrl) {
     return (
