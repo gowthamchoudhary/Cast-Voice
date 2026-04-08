@@ -64,6 +64,7 @@ export const inviteLinksTable = pgTable("invite_links", {
   filledByUserId: integer("filled_by_user_id"),
   filledByName: text("filled_by_name"),
   voiceCloneId: text("voice_clone_id"),
+  audioDataUrl: text("audio_data_url"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -77,7 +78,7 @@ export const voiceLibraryTable = pgTable("voice_library", {
   personName: text("person_name").notNull(),
   role: text("role"),
   group: text("group"),
-  elevenLabsVoiceId: text("eleven_labs_voice_id").notNull(),
+  elevenLabsVoiceId: text("eleven_labs_voice_id"),
   inviteUuid: text("invite_uuid"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
