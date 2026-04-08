@@ -101,6 +101,66 @@ const ROLE_VOICE_DESCRIPTIONS: Record<string, string> = {
   "Antagonist": "cold, calculating, menacing, crisp diction",
 };
 
+// Verified ElevenLabs pre-made voice IDs (2025) — used as fallback when voice design API unavailable
+const EL_VOICES = {
+  GEORGE:  "JBFqnCBsd6RMkjVDRZzb",
+  CHARLIE: "IKne3meq5aSn9XLyUdCD",
+  BRIAN:   "nPczCjzI2devNBz1zQrb",
+  ADAM:    "pNInz6obpgDQGcFmaJgB",
+  HARRY:   "SOYHLrjzK2X1ezoPC6cr",
+  CALLUM:  "N2lVS1w4EtoT3dr4eOWO",
+  DANIEL:  "onwK4e9ZLuTAKqWW03F9",
+  BILL:    "pqHfZKP75CvOlQylNhV4",
+  ROGER:   "CwhRBWXzGAHq8TQ4Fs17",
+  SARAH:   "EXAVITQu4vr4xnSDxMaL",
+  ALICE:   "Xb7hH8MSUJpSbSDYk0k2",
+  MATILDA: "XrExE9yKIg1WjnnlVkGX",
+  JESSICA: "cgSgspJ2msm6clMCkdW9",
+  LAURA:   "FGY2WhTYpPnrIDTdsKH5",
+  LILY:    "pFZP5JQG7iQjIQuC4Bku",
+  BELLA:   "hpp4J3VqNfWAUOO0d1Us",
+};
+
+// Role → pre-made voice mapping for character variety
+const ROLE_TO_VOICE: Record<string, string> = {
+  "Hero":                   EL_VOICES.CHARLIE,
+  "Villain":                EL_VOICES.HARRY,
+  "Side Character":         EL_VOICES.ROGER,
+  "Mastermind":             EL_VOICES.DANIEL,
+  "Hacker":                 EL_VOICES.LAURA,
+  "Muscle":                 EL_VOICES.BRIAN,
+  "Insider":                EL_VOICES.ALICE,
+  "Guard":                  EL_VOICES.ADAM,
+  "Hero (Lost Kingdom)":    EL_VOICES.GEORGE,
+  "Villain (Lost Kingdom)": EL_VOICES.CALLUM,
+  "Mentor":                 EL_VOICES.BILL,
+  "Loyal Friend":           EL_VOICES.JESSICA,
+  "Creature Companion":     EL_VOICES.BRIAN,
+  "Skeptic":                EL_VOICES.MATILDA,
+  "Scared One":             EL_VOICES.LILY,
+  "Curious Explorer":       EL_VOICES.ALICE,
+  "Voice in the Dark":      EL_VOICES.CALLUM,
+  "Captain":                EL_VOICES.DANIEL,
+  "AI Assistant":           EL_VOICES.MATILDA,
+  "Engineer":               EL_VOICES.ROGER,
+  "Scientist":              EL_VOICES.LAURA,
+  "Unknown Entity":         EL_VOICES.CALLUM,
+  "Planner":                EL_VOICES.JESSICA,
+  "Late Friend":            EL_VOICES.GEORGE,
+  "Overreactor":            EL_VOICES.LAURA,
+  "Chill One":              EL_VOICES.ROGER,
+  "Random Stranger":        EL_VOICES.BELLA,
+  "Narrator":               EL_VOICES.GEORGE,
+  "Comic Relief":           EL_VOICES.JESSICA,
+  "Antagonist":             EL_VOICES.HARRY,
+};
+
+const FALLBACK_VOICE_POOL = [
+  EL_VOICES.GEORGE, EL_VOICES.SARAH, EL_VOICES.CHARLIE, EL_VOICES.MATILDA,
+  EL_VOICES.BRIAN, EL_VOICES.JESSICA, EL_VOICES.BILL, EL_VOICES.LAURA,
+  EL_VOICES.HARRY, EL_VOICES.ALICE, EL_VOICES.ROGER, EL_VOICES.LILY,
+];
+
 function descriptionFromRole(roleOrDescription: string): string {
   const direct = ROLE_VOICE_DESCRIPTIONS[roleOrDescription];
   if (direct) return direct;
@@ -111,59 +171,93 @@ function descriptionFromRole(roleOrDescription: string): string {
   return roleOrDescription;
 }
 
+function preMadeVoiceFromDescription(description: string, charIndex: number): string {
+  const desc = (description || "").toLowerCase();
+
+  // Role name match first
+  for (const [role, voiceId] of Object.entries(ROLE_TO_VOICE)) {
+    if (desc.includes(role.toLowerCase())) return voiceId;
+  }
+
+  // Keyword-based selection
+  if (desc.includes("villain") || desc.includes("dark") || desc.includes("menacing") || desc.includes("threatening")) return EL_VOICES.HARRY;
+  if (desc.includes("hero") || desc.includes("brave") || desc.includes("determined") || desc.includes("leader")) return EL_VOICES.CHARLIE;
+  if (desc.includes("deep") || desc.includes("gruff") || desc.includes("imposing") || desc.includes("baritone")) return EL_VOICES.BRIAN;
+  if (desc.includes("wise") || desc.includes("elder") || desc.includes("mentor") || desc.includes("aged") || desc.includes("gravelly")) return EL_VOICES.BILL;
+  if (desc.includes("mysterious") || desc.includes("ethereal") || desc.includes("hollow") || desc.includes("echoing")) return EL_VOICES.CALLUM;
+  if (desc.includes("narrator") || desc.includes("storytell") || desc.includes("cinematic") || desc.includes("resonant")) return EL_VOICES.GEORGE;
+  if (desc.includes("steady") || desc.includes("captain") || desc.includes("official") || desc.includes("authoritative")) return EL_VOICES.DANIEL;
+  if (desc.includes("laid-back") || desc.includes("casual") || desc.includes("chill") || desc.includes("relaxed")) return EL_VOICES.ROGER;
+  if (desc.includes("female") || desc.includes("woman") || desc.includes("reassuring") || desc.includes("mature")) return EL_VOICES.SARAH;
+  if (desc.includes("playful") || desc.includes("bright") || desc.includes("warm") || desc.includes("friendly")) return EL_VOICES.JESSICA;
+  if (desc.includes("young") || desc.includes("energetic") || desc.includes("fast") || desc.includes("excited")) return EL_VOICES.LAURA;
+  if (desc.includes("professional") || desc.includes("precise") || desc.includes("robotic") || desc.includes("academic")) return EL_VOICES.MATILDA;
+  if (desc.includes("gentle") || desc.includes("clear") || desc.includes("soft") || desc.includes("educator")) return EL_VOICES.ALICE;
+  if (desc.includes("velvety") || desc.includes("actress") || desc.includes("anxious") || desc.includes("trembling")) return EL_VOICES.LILY;
+
+  // Default: rotate through pool by character index for variety
+  return FALLBACK_VOICE_POOL[charIndex % FALLBACK_VOICE_POOL.length];
+}
+
 async function designVoiceForCharacter(
   char: { id: string; name: string; description: string },
   castEntry: CastEntry | undefined,
+  charIndex: number,
 ): Promise<string> {
   if (!ELEVENLABS_API_KEY) throw new Error("ELEVENLABS_API_KEY not set");
 
   let voiceDescription: string;
 
   if (castEntry?.voiceType === "ai_designed" && castEntry.description) {
-    // User typed a custom voice description — use it directly
     voiceDescription = castEntry.description;
   } else {
-    // user_clone / library / invite / no cast entry:
-    // look up by character description/role in the role map, fall back to raw description
     voiceDescription = descriptionFromRole(char.description || char.name);
   }
 
   const endpoint = "https://api.elevenlabs.io/v1/voice-generation/generate-voice";
   const t0 = Date.now();
-  logger.info({ endpoint, characterName: char.name, voiceDescription }, "Designing voice");
+  logger.info({ endpoint, characterName: char.name, voiceDescription }, "Attempting EL voice design");
 
-  const response = await fetchWithTimeout(
-    endpoint,
-    {
-      method: "POST",
-      headers: {
-        "xi-api-key": ELEVENLABS_API_KEY,
-        "Content-Type": "application/json",
+  try {
+    const response = await fetchWithTimeout(
+      endpoint,
+      {
+        method: "POST",
+        headers: {
+          "xi-api-key": ELEVENLABS_API_KEY,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          voice_description: voiceDescription.trim(),
+          text: "Hello. I am ready to perform.",
+        }),
       },
-      body: JSON.stringify({
-        voice_description: voiceDescription.trim(),
-        text: "Hello. I am ready to perform.",
-      }),
-    },
-    30000,
-  );
+      20000,
+    );
 
-  const responseTimeMs = Date.now() - t0;
+    const responseTimeMs = Date.now() - t0;
 
-  if (!response.ok) {
-    const errorBody = await response.text().catch(() => "");
-    logger.error({ endpoint, status: response.status, responseTimeMs, errorBody }, "Voice design failed");
-    throw new Error(`Voice design failed: HTTP ${response.status} — ${errorBody.slice(0, 200)}`);
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => "");
+      logger.warn({ endpoint, status: response.status, responseTimeMs, errorBody, characterName: char.name }, "Voice design API unavailable — using pre-made voice");
+      const fallback = preMadeVoiceFromDescription(voiceDescription, charIndex);
+      logger.info({ characterName: char.name, fallbackVoiceId: fallback }, "Pre-made voice selected");
+      return fallback;
+    }
+
+    const data = await response.json() as { voice_id?: string };
+    logger.info({ endpoint, status: response.status, responseTimeMs, voiceId: data.voice_id, characterName: char.name }, "Voice designed via API");
+
+    if (data.voice_id) return data.voice_id;
+
+    logger.warn({ characterName: char.name }, "Voice design returned no voice_id — using pre-made voice");
+    return preMadeVoiceFromDescription(voiceDescription, charIndex);
+
+  } catch (err: any) {
+    const responseTimeMs = Date.now() - t0;
+    logger.warn({ err: err?.message, responseTimeMs, characterName: char.name }, "Voice design request failed — using pre-made voice");
+    return preMadeVoiceFromDescription(voiceDescription, charIndex);
   }
-
-  const data = await response.json() as { voice_id?: string };
-  logger.info({ endpoint, status: response.status, responseTimeMs, voiceId: data.voice_id, characterName: char.name }, "Voice designed");
-
-  if (!data.voice_id) {
-    throw new Error("Voice design returned no voice_id");
-  }
-
-  return data.voice_id;
 }
 
 async function elevenLabsTTS(
@@ -497,7 +591,7 @@ export async function generateAudioDrama(projectId: number): Promise<void> {
     await updateProgress(projectId, progress, `Designing ${char.name}'s voice...`);
 
     try {
-      const voiceId = await designVoiceForCharacter(char, castEntry);
+      const voiceId = await designVoiceForCharacter(char, castEntry, i);
       voiceMap.set(char.id, voiceId);
     } catch (err: any) {
       logger.error({ err: err?.message, characterName: char.name }, "Voice design failed for character");
