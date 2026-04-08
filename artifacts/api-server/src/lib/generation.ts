@@ -81,12 +81,16 @@ function pickFallbackVoice(description: string, characterIndex: number): string 
   return STREAM_ELEMENTS_VOICES_MALE[characterIndex % STREAM_ELEMENTS_VOICES_MALE.length];
 }
 
+function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...init, signal: controller.signal }).finally(() => clearTimeout(timer));
+}
+
 async function fallbackTTS(text: string, voiceName: string): Promise<Buffer | null> {
   try {
     const url = `https://api.streamelements.com/kappa/v2/speech?voice=${encodeURIComponent(voiceName)}&text=${encodeURIComponent(text)}`;
-    const response = await fetch(url, {
-      headers: { "User-Agent": "CastVoice/1.0" },
-    });
+    const response = await fetchWithTimeout(url, { headers: { "User-Agent": "CastVoice/1.0" } }, 8000);
     if (!response.ok) {
       logger.warn({ status: response.status, voiceName }, "Fallback TTS request failed");
       return null;
@@ -95,8 +99,12 @@ async function fallbackTTS(text: string, voiceName: string): Promise<Buffer | nu
     const buf = Buffer.from(arrayBuffer);
     if (buf.length < 100) return null; // reject empty/error responses
     return buf;
-  } catch (err) {
-    logger.error({ err }, "Fallback TTS error");
+  } catch (err: any) {
+    if (err?.name === "AbortError") {
+      logger.warn({ voiceName }, "Fallback TTS timed out");
+    } else {
+      logger.error({ err }, "Fallback TTS error");
+    }
     return null;
   }
 }
@@ -117,24 +125,28 @@ async function elevenLabsTTS(
   const style = emotionToStyle(emotion);
 
   try {
-    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
-      method: "POST",
-      headers: {
-        "xi-api-key": ELEVENLABS_API_KEY,
-        "Content-Type": "application/json",
-        "Accept": "audio/mpeg",
-      },
-      body: JSON.stringify({
-        text,
-        model_id: "eleven_turbo_v2",
-        voice_settings: {
-          stability,
-          similarity_boost: 0.8,
-          style,
-          use_speaker_boost: true,
+    const response = await fetchWithTimeout(
+      `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
+      {
+        method: "POST",
+        headers: {
+          "xi-api-key": ELEVENLABS_API_KEY,
+          "Content-Type": "application/json",
+          "Accept": "audio/mpeg",
         },
-      }),
-    });
+        body: JSON.stringify({
+          text,
+          model_id: "eleven_turbo_v2",
+          voice_settings: {
+            stability,
+            similarity_boost: 0.8,
+            style,
+            use_speaker_boost: true,
+          },
+        }),
+      },
+      15000,
+    );
 
     if (!response.ok) {
       if (response.status === 402) {
@@ -158,19 +170,23 @@ async function elevenLabsSFX(description: string): Promise<Buffer | null> {
   if (!ELEVENLABS_API_KEY || elevenLabsQuotaExceeded) return null;
 
   try {
-    const response = await fetch("https://api.elevenlabs.io/v1/sound-generation", {
-      method: "POST",
-      headers: {
-        "xi-api-key": ELEVENLABS_API_KEY,
-        "Content-Type": "application/json",
-        "Accept": "audio/mpeg",
+    const response = await fetchWithTimeout(
+      "https://api.elevenlabs.io/v1/sound-generation",
+      {
+        method: "POST",
+        headers: {
+          "xi-api-key": ELEVENLABS_API_KEY,
+          "Content-Type": "application/json",
+          "Accept": "audio/mpeg",
+        },
+        body: JSON.stringify({
+          text: description,
+          duration_seconds: 3,
+          prompt_influence: 0.3,
+        }),
       },
-      body: JSON.stringify({
-        text: description,
-        duration_seconds: 3,
-        prompt_influence: 0.3,
-      }),
-    });
+      15000,
+    );
 
     if (!response.ok) {
       if (response.status === 402) elevenLabsQuotaExceeded = true;
