@@ -269,43 +269,97 @@ function getDefaultVoice(description: string): string {
 // ---------------------------------------------------------------------------
 // Script generation — converts raw story text + characters into dialogue scenes
 // ---------------------------------------------------------------------------
+
+/**
+ * Fallback: extract quoted dialogue directly from the story text.
+ * Works on any narrative fiction with speech in double quotes.
+ */
+function extractDialogueFromRawText(
+  rawText: string,
+  characters: Array<{ id: string; name: string; description: string }>,
+): ScriptScene[] {
+  const characterNames = characters.map(c => c.name);
+  const lines: ScriptLine[] = [];
+
+  const dialogueRegex = /"([^"]{5,280})"/g;
+  const matches = [...rawText.matchAll(dialogueRegex)];
+
+  const SPEECH_VERBS = /\b(said|replied|asked|called|exclaimed|inquired|noted|observed|started|interrupted|responded|answered|continued|whispered|shouted|muttered|quipped|assured|relented|shot back|deflected)\b/i;
+
+  for (const match of matches) {
+    const quote = match[1].trim();
+    if (!quote || quote.length < 5) continue;
+
+    const matchStart = match.index ?? 0;
+    // Look 80 chars before and after for speaker name
+    const before = rawText.slice(Math.max(0, matchStart - 80), matchStart);
+    const after = rawText.slice(matchStart + quote.length + 2, matchStart + quote.length + 100);
+
+    // Try to find a character name in the surrounding context
+    let assignedChar: string | null = null;
+
+    for (const name of characterNames) {
+      if (before.includes(name) || after.includes(name)) {
+        assignedChar = name;
+        break;
+      }
+    }
+
+    // If no name found, check if after context has a speech verb (implies the previous line speaker)
+    if (!assignedChar && SPEECH_VERBS.test(after)) {
+      assignedChar = characterNames[lines.length % characterNames.length];
+    }
+
+    if (!assignedChar) continue;
+
+    // Simple emotion heuristics from punctuation/words
+    let emotion = "neutral";
+    if (quote.endsWith("!") || /\b(amazing|incredible|no!|yes!)\b/i.test(quote)) emotion = "excited";
+    else if (quote.endsWith("?")) emotion = "curious";
+    else if (/\b(sorry|afraid|hate|never|why)\b/i.test(quote)) emotion = "sad";
+
+    lines.push({ character: assignedChar, emotion, stability: 0.5, text: quote });
+  }
+
+  if (lines.length === 0) return [];
+
+  // Group into scenes of ~6 lines each (max 4 scenes)
+  const linesPerScene = Math.max(4, Math.ceil(lines.length / 4));
+  const scenes: ScriptScene[] = [];
+  for (let i = 0; i < lines.length && scenes.length < 4; i += linesPerScene) {
+    const sceneLines = lines.slice(i, i + linesPerScene);
+    if (sceneLines.length === 0) break;
+    scenes.push({
+      scene: scenes.length + 1,
+      scene_description: `Scene ${scenes.length + 1}: ${sceneLines[0].character} speaks`,
+      lines: sceneLines,
+    });
+  }
+
+  logger.info({ lineCount: lines.length, sceneCount: scenes.length }, "Dialogue extracted from story text");
+  return scenes;
+}
+
 async function generateScriptFromText(
   rawText: string,
   characters: Array<{ id: string; name: string; description: string }>,
   title: string,
 ): Promise<ScriptScene[]> {
-  const charList = characters.map(c => `- ${c.name}: ${c.description}`).join("\n");
-  const prompt = `You are a dramatic script writer. Convert the following story into a radio drama script with 2-4 scenes.
+  // Use only first 3 chars + title to keep the prompt short and fast
+  const charList = characters.slice(0, 4).map(c => `- ${c.name}: ${c.description.slice(0, 80)}`).join("\n");
+  const storyChunk = rawText.slice(0, 3000);
 
-Story title: "${title}"
+  const prompt = `You are a script writer. Convert this story excerpt into a radio drama with 2-3 scenes of 4-6 dialogue lines each.
 
+Story: "${title}"
 Characters:
 ${charList}
 
-Story text:
-${rawText.slice(0, 6000)}
+Excerpt:
+${storyChunk}
 
-Write a script where the characters have natural dialogue that dramatizes the key moments of the story.
-Each scene should have 4-8 lines of dialogue.
-
-Respond ONLY with valid JSON in this exact format (no markdown, no extra text):
-{
-  "scenes": [
-    {
-      "scene": 1,
-      "scene_description": "Brief scene description for imagery",
-      "sfx_before": "optional sound effect description or omit",
-      "lines": [
-        {
-          "character": "EXACT character name from the list above",
-          "emotion": "one word emotion",
-          "stability": 0.5,
-          "text": "What the character says"
-        }
-      ]
-    }
-  ]
-}`;
+Respond ONLY with valid JSON (no markdown):
+{"scenes":[{"scene":1,"scene_description":"brief description","lines":[{"character":"Name","emotion":"neutral","stability":0.5,"text":"dialogue"}]}]}`;
 
   try {
     const resp = await fetchWithTimeout("https://text.pollinations.ai/", {
@@ -316,23 +370,32 @@ Respond ONLY with valid JSON in this exact format (no markdown, no extra text):
         model: "openai",
         jsonMode: true,
       }),
-    }, 40000);
+    }, 35000);
 
-    if (!resp.ok) {
-      logger.warn({ status: resp.status }, "Script generation AI call failed");
-      return [];
+    if (resp.ok) {
+      const raw = await resp.text();
+      logger.info({ rawPreview: raw.slice(0, 200) }, "Pollinations script response received");
+      try {
+        const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
+        const parsed = JSON.parse(cleaned);
+        if (Array.isArray(parsed.scenes) && parsed.scenes.length > 0) {
+          logger.info({ sceneCount: parsed.scenes.length }, "Script generated via Pollinations AI");
+          return parsed.scenes;
+        }
+        logger.warn({ parsed: JSON.stringify(parsed).slice(0, 200) }, "Pollinations returned empty/invalid scenes, using fallback");
+      } catch (parseErr: any) {
+        logger.warn({ parseErr: parseErr?.message, raw: raw.slice(0, 300) }, "Pollinations JSON parse failed, using fallback");
+      }
+    } else {
+      logger.warn({ status: resp.status }, "Pollinations script generation call failed, using fallback");
     }
-
-    const raw = await resp.text();
-    const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
-    const parsed = JSON.parse(cleaned);
-    if (!Array.isArray(parsed.scenes)) return [];
-    logger.info({ sceneCount: parsed.scenes.length }, "Script generated from story text");
-    return parsed.scenes;
-  } catch (err) {
-    logger.error({ err }, "Script generation failed");
-    return [];
+  } catch (err: any) {
+    logger.warn({ err: err?.message || err }, "Pollinations call errored, using fallback");
   }
+
+  // Fallback: extract dialogue directly from the raw story text
+  logger.info("Attempting dialogue extraction from raw story text");
+  return extractDialogueFromRawText(rawText, characters);
 }
 
 export async function generateAudioDrama(projectId: number): Promise<void> {
