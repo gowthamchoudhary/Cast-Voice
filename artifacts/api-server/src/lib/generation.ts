@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import fs from "fs/promises";
 import { execFile } from "child_process";
 import { promisify } from "util";
-import { db, projectsTable, storiesTable, inviteLinksTable, userProfilesTable } from "@workspace/db";
+import { db, projectsTable, storiesTable } from "@workspace/db";
 import { logger } from "./logger";
 
 const execFileAsync = promisify(execFile);
@@ -77,6 +77,8 @@ const ROLE_VOICE_DESCRIPTIONS: Record<string, string> = {
   "Muscle": "very deep, slow, few words, imposing",
   "Insider": "anxious, shaky, whispering, scared",
   "Guard": "official, suspicious, flat, authoritative",
+  "Hero (Lost Kingdom)": "young, wondering, earnest, discovering courage",
+  "Villain (Lost Kingdom)": "theatrical, cold, echoing, dark",
   "Mentor": "aged, warm, slow, wise, gravelly",
   "Loyal Friend": "upbeat, nervous humor, loyal, young",
   "Creature Companion": "rumbling, gentle, non-human, otherworldly",
@@ -118,8 +120,11 @@ async function designVoiceForCharacter(
   let voiceDescription: string;
 
   if (castEntry?.voiceType === "ai_designed" && castEntry.description) {
+    // User typed a custom voice description — use it directly
     voiceDescription = castEntry.description;
   } else {
+    // user_clone / library / invite / no cast entry:
+    // look up by character description/role in the role map, fall back to raw description
     voiceDescription = descriptionFromRole(char.description || char.name);
   }
 
@@ -254,6 +259,7 @@ async function elevenLabsSFX(description: string, filePath: string): Promise<voi
 async function mergeWithFfmpeg(projectId: number, orderedFiles: string[]): Promise<Buffer> {
   const concatListPath = `/tmp/concat_${projectId}.txt`;
   const outputPath = `/tmp/final_${projectId}.mp3`;
+  const allFiles = [...orderedFiles, concatListPath, outputPath];
 
   const concatContent = orderedFiles.map(f => `file '${f}'`).join("\n");
   await fs.writeFile(concatListPath, concatContent, "utf8");
@@ -274,13 +280,17 @@ async function mergeWithFfmpeg(projectId: number, orderedFiles: string[]): Promi
     if (stderr) logger.info({ stderr: stderr.slice(0, 500) }, "ffmpeg stderr");
   } catch (err: any) {
     logger.error({ err: err?.message, stderr: err?.stderr?.slice(0, 500) }, "ffmpeg failed");
+    await cleanupTempFiles(projectId, allFiles);
     throw new Error(`ffmpeg merge failed: ${err?.message}`);
   }
 
-  const buffer = await fs.readFile(outputPath);
-  logger.info({ projectId, outputBytes: buffer.length }, "ffmpeg merge complete");
-
-  await cleanupTempFiles(projectId, [...orderedFiles, concatListPath, outputPath]);
+  let buffer: Buffer;
+  try {
+    buffer = await fs.readFile(outputPath);
+    logger.info({ projectId, outputBytes: buffer.length }, "ffmpeg merge complete");
+  } finally {
+    await cleanupTempFiles(projectId, allFiles);
+  }
 
   return buffer;
 }
@@ -438,11 +448,6 @@ export async function generateAudioDrama(projectId: number): Promise<void> {
     throw new Error(`Story ${project.storyId} not found`);
   }
 
-  const [ownerProfile] = await db
-    .select()
-    .from(userProfilesTable)
-    .where(eq(userProfilesTable.id, project.userId));
-
   const rawCast = (project.castJson as { voices?: Record<string, CastEntry> }) || {};
   const castJson: Record<string, CastEntry> = rawCast.voices || {};
   const script = story.scriptJson as { scenes: ScriptScene[] };
@@ -478,7 +483,11 @@ export async function generateAudioDrama(projectId: number): Promise<void> {
 
   const totalLines = scenes.reduce((acc, s) => acc + s.lines.length, 0);
 
-  // STEP 1: Design voices for all characters
+  // STEP 1: Design voices for all characters via ElevenLabs Voice Design API
+  // Every character regardless of voiceType gets a fresh AI-designed voice:
+  //   - ai_designed → use the user's custom description
+  //   - user_clone / library / invite → use role-based description from ROLE_VOICE_DESCRIPTIONS
+  //   - no cast entry → use character.description from story
   const voiceMap = new Map<string, string>();
 
   for (let i = 0; i < storyCharacters.length; i++) {
@@ -488,28 +497,7 @@ export async function generateAudioDrama(projectId: number): Promise<void> {
     await updateProgress(projectId, progress, `Designing ${char.name}'s voice...`);
 
     try {
-      let voiceId: string;
-
-      if (castEntry?.voiceType === "user_clone" && ownerProfile?.voiceCloneId) {
-        voiceId = ownerProfile.voiceCloneId;
-      } else if (castEntry?.voiceType === "invite" && castEntry.inviteUuid) {
-        const [invite] = await db
-          .select()
-          .from(inviteLinksTable)
-          .where(eq(inviteLinksTable.uuid, castEntry.inviteUuid));
-        if (invite?.voiceCloneId) {
-          voiceId = invite.voiceCloneId;
-        } else {
-          voiceId = await designVoiceForCharacter(char, castEntry);
-        }
-      } else if (castEntry?.voiceType === "library" && castEntry.elevenLabsVoiceId) {
-        voiceId = castEntry.elevenLabsVoiceId;
-      } else if (castEntry?.voiceType === "ai_designed" && castEntry.elevenLabsVoiceId) {
-        voiceId = castEntry.elevenLabsVoiceId;
-      } else {
-        voiceId = await designVoiceForCharacter(char, castEntry);
-      }
-
+      const voiceId = await designVoiceForCharacter(char, castEntry);
       voiceMap.set(char.id, voiceId);
     } catch (err: any) {
       logger.error({ err: err?.message, characterName: char.name }, "Voice design failed for character");
