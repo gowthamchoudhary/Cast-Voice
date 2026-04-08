@@ -20,12 +20,11 @@ function Nav() {
 }
 
 const STAGES = [
-  { key: "designing_voices", label: "Designing voices..." },
-  { key: "generating_speech", label: "Generating speech lines..." },
-  { key: "adding_sfx", label: "Adding sound effects..." },
-  { key: "generating_images", label: "Creating scene imagery..." },
-  { key: "mixing_audio", label: "Mixing final audio..." },
-  { key: "ready", label: "Drama ready!" },
+  { label: "Designing character voices", maxProgress: 25 },
+  { label: "Recording dialogue lines", maxProgress: 82 },
+  { label: "Generating scene imagery", maxProgress: 88 },
+  { label: "Mixing final audio", maxProgress: 98 },
+  { label: "Drama ready!", maxProgress: 100 },
 ];
 
 export default function Generate({ projectId }: { projectId: string }) {
@@ -48,9 +47,8 @@ export default function Generate({ projectId }: { projectId: string }) {
     }
   }, [(status as any)?.status, projectId, setLocation]);
 
-  const currentStage = (status as any)?.generationStage || "designing_voices";
-  const stageIndex = STAGES.findIndex((s) => s.key === currentStage);
-  const progress = stageIndex === -1 ? 0 : Math.round(((stageIndex + 1) / STAGES.length) * 100);
+  const progress = (status as any)?.progress ?? 0;
+  const currentStep = (status as any)?.currentStep as string | undefined;
   const isFailed = (status as any)?.status === "failed";
 
   return (
@@ -66,7 +64,7 @@ export default function Generate({ projectId }: { projectId: string }) {
             <div>
               <div className="text-5xl mb-4">⚠️</div>
               <h1 className="font-serif text-2xl font-bold text-destructive mb-2">Generation Failed</h1>
-              <p className="text-muted-foreground mb-6">{(status as any)?.error || "Something went wrong during generation."}</p>
+              <p className="text-muted-foreground mb-6">{(status as any)?.error || currentStep || "Something went wrong during generation."}</p>
               <button
                 className="text-primary underline text-sm"
                 onClick={() => setLocation(`/cast/${projectId}`)}
@@ -90,17 +88,25 @@ export default function Generate({ projectId }: { projectId: string }) {
                 Our AI is hard at work bringing your story to life.
               </p>
 
-              <div className="w-full mb-4">
+              <div className="w-full mb-2">
                 <Progress value={progress} className="h-2" />
               </div>
 
-              <div className="space-y-2">
+              {/* Live current step label */}
+              {currentStep && (
+                <p className="text-sm text-primary font-medium mb-6 min-h-[1.5rem] transition-all">
+                  {currentStep}
+                </p>
+              )}
+
+              <div className="space-y-2 mt-4">
                 {STAGES.map((stage, i) => {
-                  const done = i < stageIndex;
-                  const active = i === stageIndex;
+                  const stageMin = i === 0 ? 0 : STAGES[i - 1].maxProgress;
+                  const done = progress >= stage.maxProgress;
+                  const active = !done && progress >= stageMin;
                   return (
                     <div
-                      key={stage.key}
+                      key={stage.label}
                       className={`flex items-center gap-3 text-sm px-4 py-2 rounded-lg transition-colors ${
                         active ? "bg-primary/10 text-primary" : done ? "text-muted-foreground/50" : "text-muted-foreground/30"
                       }`}

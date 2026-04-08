@@ -304,8 +304,24 @@ function CastDialog({
     { id: "invite", label: "Invite Friend", emoji: "🔗" },
   ];
 
+  const showCloningBanner = activeTab === "user_clone" || activeTab === "library" || activeTab === "invite";
+
   return (
     <div className="space-y-4">
+      {/* Voice Cloning Coming Soon banner */}
+      {showCloningBanner && (
+        <div className="flex items-start gap-2 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2.5">
+          <span className="text-amber-500 text-sm mt-0.5">🎙️</span>
+          <div>
+            <p className="text-xs font-semibold text-amber-500">Voice Cloning Coming Soon</p>
+            <p className="text-xs text-muted-foreground leading-relaxed mt-0.5">
+              Your voice is saved. We're launching cloning with studio subscriptions soon.
+              Your character will be voiced with a matching AI voice for now.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Tab bar */}
       <div className="flex border-b border-border">
         {TABS.map(tab => (
