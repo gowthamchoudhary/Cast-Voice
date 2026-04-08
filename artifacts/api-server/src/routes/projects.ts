@@ -32,11 +32,22 @@ router.get("/projects", async (req: Request, res: Response): Promise<void> => {
     return;
   }
 
-  const projects = await db
-    .select()
+  const rows = await db
+    .select({
+      project: projectsTable,
+      storySceneImageUrl: storiesTable.sceneImageUrl,
+      storySynopsis: storiesTable.synopsis,
+    })
     .from(projectsTable)
+    .leftJoin(storiesTable, eq(storiesTable.id, projectsTable.storyId))
     .where(eq(projectsTable.userId, profiles[0].id))
     .orderBy(projectsTable.createdAt);
+
+  const projects = rows.map(({ project, storySceneImageUrl, storySynopsis }) => ({
+    ...project,
+    sceneImageUrl: storySceneImageUrl,
+    synopsis: storySynopsis,
+  }));
 
   res.json(projects);
 });

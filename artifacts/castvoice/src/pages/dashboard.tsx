@@ -37,11 +37,12 @@ function Nav() {
   );
 }
 
-const STATUS_LABELS: Record<string, { label: string; color: "default" | "secondary" | "destructive" | "outline" }> = {
-  casting: { label: "Casting", color: "secondary" },
-  generating: { label: "Generating", color: "default" },
-  ready: { label: "Ready", color: "default" },
-  failed: { label: "Failed", color: "destructive" },
+const STATUS_CONFIG: Record<string, { label: string; color: "default" | "secondary" | "destructive" | "outline"; icon: string }> = {
+  draft:      { label: "Casting",    color: "secondary",    icon: "🎭" },
+  casting:    { label: "Casting",    color: "secondary",    icon: "🎭" },
+  generating: { label: "Generating", color: "default",      icon: "⚡" },
+  ready:      { label: "Ready",      color: "default",      icon: "▶" },
+  error:      { label: "Failed",     color: "destructive",  icon: "✕" },
 };
 
 export default function Dashboard() {
@@ -72,7 +73,7 @@ export default function Dashboard() {
           <div className="flex justify-center py-20">
             <Spinner />
           </div>
-        ) : !projects || projects.length === 0 ? (
+        ) : projects.length === 0 ? (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -90,43 +91,77 @@ export default function Dashboard() {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {(projects as any[]).map((project: any, i: number) => {
-              const statusInfo = STATUS_LABELS[project.status] || { label: project.status, color: "secondary" as const };
+              const status = project.status || "draft";
+              const statusInfo = STATUS_CONFIG[status] || { label: status, color: "secondary" as const, icon: "🎭" };
+              const title = project.storyTitle || project.title || "Untitled";
+              const synopsis = project.synopsis || "";
+              const imageUrl = project.sceneImageUrl || project.story?.sceneImageUrl;
+
               return (
                 <motion.div
                   key={project.id}
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: i * 0.05 }}
-                  className="bg-card border border-border rounded-xl overflow-hidden hover:border-primary/30 transition-colors cursor-pointer group"
+                  className="bg-card border border-border rounded-xl overflow-hidden hover:border-primary/40 transition-all cursor-pointer group shadow-sm hover:shadow-md"
                   onClick={() => {
-                    if (project.status === "ready") {
+                    if (status === "ready") {
                       setLocation(`/play/${project.id}`);
-                    } else if (project.status === "generating") {
+                    } else if (status === "generating") {
                       setLocation(`/generate/${project.id}`);
                     } else {
                       setLocation(`/cast/${project.id}`);
                     }
                   }}
                 >
-                  {project.story?.sceneImageUrl && (
-                    <div className="h-40 overflow-hidden bg-muted">
+                  {/* Cover image */}
+                  <div className="h-44 overflow-hidden bg-gradient-to-br from-primary/10 via-muted to-muted relative">
+                    {imageUrl ? (
                       <img
-                        src={project.story.sceneImageUrl}
-                        alt={project.title}
+                        src={imageUrl}
+                        alt={title}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
                       />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-5xl opacity-30">
+                        🎭
+                      </div>
+                    )}
+                    {/* Genre chip */}
+                    {project.storyGenre && (
+                      <div className="absolute top-3 left-3 bg-black/60 text-white text-[10px] font-medium px-2 py-0.5 rounded-full backdrop-blur-sm">
+                        {project.storyGenre}
+                      </div>
+                    )}
+                    {/* Status chip */}
+                    <div className="absolute top-3 right-3">
+                      <Badge variant={statusInfo.color} className="text-xs shadow-sm">
+                        {statusInfo.icon} {statusInfo.label}
+                      </Badge>
                     </div>
-                  )}
+                  </div>
+
+                  {/* Card body */}
                   <div className="p-5">
-                    <div className="flex items-start justify-between gap-2 mb-2">
-                      <h3 className="font-serif text-base font-semibold text-foreground leading-snug">{project.title}</h3>
-                      <Badge variant={statusInfo.color} className="shrink-0 text-xs">{statusInfo.label}</Badge>
+                    <h3 className="font-serif text-base font-semibold text-foreground leading-snug mb-1 line-clamp-2">
+                      {title}
+                    </h3>
+                    {synopsis && (
+                      <p className="text-xs text-muted-foreground line-clamp-2 mb-3 leading-relaxed">
+                        {synopsis}
+                      </p>
+                    )}
+                    <div className="flex items-center justify-between">
+                      <p className="text-[11px] text-muted-foreground">
+                        {project.createdAt
+                          ? formatDistanceToNow(new Date(project.createdAt), { addSuffix: true })
+                          : ""}
+                      </p>
+                      <span className="text-[11px] text-primary font-medium group-hover:underline">
+                        {status === "ready" ? "Play →" : status === "generating" ? "View progress →" : "Continue →"}
+                      </span>
                     </div>
-                    <p className="text-xs text-muted-foreground">
-                      {project.createdAt
-                        ? formatDistanceToNow(new Date(project.createdAt), { addSuffix: true })
-                        : ""}
-                    </p>
                   </div>
                 </motion.div>
               );
