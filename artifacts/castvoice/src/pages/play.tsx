@@ -40,6 +40,8 @@ export default function Play({ projectId }: { projectId: string }) {
   const [duration, setDuration] = useState(0);
   const [currentScene, setCurrentScene] = useState(0);
   const [volume, setVolume] = useState(1);
+  const [audioError, setAudioError] = useState(false);
+  const playingRef = useRef(false); // guard against race conditions
 
   const { data: project, isLoading } = useQuery({
     queryKey: [`/api/projects/${projectId}`],
@@ -63,27 +65,43 @@ export default function Play({ projectId }: { projectId: string }) {
     const audio = audioRef.current;
     if (!audio) return;
     const onTime = () => setCurrentTime(audio.currentTime);
-    const onDuration = () => setDuration(audio.duration);
-    const onEnd = () => setIsPlaying(false);
+    const onDuration = () => {
+      if (isFinite(audio.duration)) setDuration(audio.duration);
+    };
+    const onEnd = () => { setIsPlaying(false); playingRef.current = false; };
+    const onError = () => { setAudioError(true); setIsPlaying(false); playingRef.current = false; };
     audio.addEventListener("timeupdate", onTime);
     audio.addEventListener("durationchange", onDuration);
     audio.addEventListener("ended", onEnd);
+    audio.addEventListener("error", onError);
     return () => {
       audio.removeEventListener("timeupdate", onTime);
       audio.removeEventListener("durationchange", onDuration);
       audio.removeEventListener("ended", onEnd);
+      audio.removeEventListener("error", onError);
     };
-  }, [audioUrl]);
+  }, [audioUrl]); // re-attach when source changes
 
-  const togglePlay = () => {
+  const togglePlay = async () => {
     const audio = audioRef.current;
     if (!audio) return;
-    if (isPlaying) {
+    if (playingRef.current || isPlaying) {
       audio.pause();
+      playingRef.current = false;
       setIsPlaying(false);
     } else {
-      audio.play();
-      setIsPlaying(true);
+      try {
+        playingRef.current = true;
+        setIsPlaying(true);
+        await audio.play();
+      } catch (err: any) {
+        // AbortError is harmless (e.g. rapid click); other errors are real
+        if (err?.name !== "AbortError") {
+          setAudioError(true);
+        }
+        playingRef.current = false;
+        setIsPlaying(false);
+      }
     }
   };
 
@@ -107,15 +125,19 @@ export default function Play({ projectId }: { projectId: string }) {
     );
   }
 
-  if (!audioUrl) {
+  if (!audioUrl || audioError) {
     return (
       <div className="min-h-screen bg-background">
         <Nav />
         <div className="flex flex-col items-center justify-center py-24 text-center px-4">
           <div className="text-5xl mb-4">🎭</div>
-          <h2 className="font-serif text-2xl text-foreground mb-2">Audio Not Ready</h2>
+          <h2 className="font-serif text-2xl text-foreground mb-2">
+            {audioError ? "Audio Playback Failed" : "Audio Not Ready"}
+          </h2>
           <p className="text-muted-foreground mb-8 max-w-sm">
-            The drama hasn't been generated yet, or generation ran into an issue. Try generating again.
+            {audioError
+              ? "The audio file couldn't be played — it may have been generated with errors. Regenerate to fix it."
+              : "The drama hasn't been generated yet, or generation ran into an issue. Try generating again."}
           </p>
           <div className="flex gap-3">
             <Button
