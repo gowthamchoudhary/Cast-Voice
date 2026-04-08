@@ -1,12 +1,13 @@
 import { useLocation } from "wouter";
-import { useQuery } from "@tanstack/react-query";
-import { motion } from "framer-motion";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@workspace/replit-auth-web";
 import { useApi } from "@/hooks/use-api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Spinner } from "@/components/ui/spinner";
 import { formatDistanceToNow } from "date-fns";
+import { useState, useRef, useEffect } from "react";
 
 function Nav() {
   const { user } = useAuth();
@@ -45,9 +46,91 @@ const STATUS_CONFIG: Record<string, { label: string; color: "default" | "seconda
   error:      { label: "Failed",     color: "destructive",  icon: "✕" },
 };
 
+function ProjectMenu({ projectId, onDelete }: { projectId: number; onDelete: () => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  return (
+    <div ref={ref} className="relative" onClick={(e) => e.stopPropagation()}>
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+        aria-label="Project options"
+      >
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+          <circle cx="8" cy="3" r="1.2" />
+          <circle cx="8" cy="8" r="1.2" />
+          <circle cx="8" cy="13" r="1.2" />
+        </svg>
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: -4 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: -4 }}
+            transition={{ duration: 0.1 }}
+            className="absolute right-0 top-9 z-50 w-36 bg-popover border border-border rounded-lg shadow-lg py-1 text-sm"
+          >
+            <button
+              onClick={() => { setOpen(false); onDelete(); }}
+              className="w-full flex items-center gap-2 px-3 py-2 text-destructive hover:bg-destructive/10 transition-colors rounded-sm"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="3 6 5 6 21 6" />
+                <path d="M19 6l-1 14H6L5 6" />
+                <path d="M10 11v6M14 11v6" />
+                <path d="M9 6V4h6v2" />
+              </svg>
+              Delete
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function DeleteConfirmDialog({ title, onConfirm, onCancel }: { title: string; onConfirm: () => void; onCancel: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={onCancel}>
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.95 }}
+        className="bg-card border border-border rounded-2xl p-6 max-w-sm w-full shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="text-center mb-5">
+          <div className="text-4xl mb-3">🗑️</div>
+          <h3 className="font-serif text-lg font-semibold text-foreground mb-1">Delete project?</h3>
+          <p className="text-sm text-muted-foreground">
+            "<span className="text-foreground font-medium">{title}</span>" will be permanently deleted. This cannot be undone.
+          </p>
+        </div>
+        <div className="flex gap-3">
+          <Button variant="outline" className="flex-1" onClick={onCancel}>Cancel</Button>
+          <Button variant="destructive" className="flex-1" onClick={onConfirm}>Delete</Button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const [, setLocation] = useLocation();
   const api = useApi();
+  const queryClient = useQueryClient();
+  const [confirmDelete, setConfirmDelete] = useState<{ id: number; title: string } | null>(null);
+  const [deletingIds, setDeletingIds] = useState<Set<number>>(new Set());
 
   const { data: rawProjects, isLoading } = useQuery({
     queryKey: ["/api/projects"],
@@ -55,8 +138,28 @@ export default function Dashboard() {
   });
   const projects = Array.isArray(rawProjects) ? rawProjects : [];
 
+  async function handleDelete(id: number) {
+    setConfirmDelete(null);
+    setDeletingIds(prev => new Set(prev).add(id));
+    try {
+      await api.del(`/api/projects/${id}`);
+      queryClient.invalidateQueries({ queryKey: ["/api/projects"] });
+    } finally {
+      setDeletingIds(prev => { const s = new Set(prev); s.delete(id); return s; });
+    }
+  }
+
   return (
     <div className="min-h-screen bg-background">
+      <AnimatePresence>
+        {confirmDelete && (
+          <DeleteConfirmDialog
+            title={confirmDelete.title}
+            onConfirm={() => handleDelete(confirmDelete.id)}
+            onCancel={() => setConfirmDelete(null)}
+          />
+        )}
+      </AnimatePresence>
       <Nav />
       <main className="max-w-6xl mx-auto px-6 py-10">
         <div className="flex items-center justify-between mb-10">
@@ -97,14 +200,18 @@ export default function Dashboard() {
               const synopsis = project.synopsis || "";
               const imageUrl = project.sceneImageUrl || project.story?.sceneImageUrl;
 
+              const isDeleting = deletingIds.has(project.id);
+
               return (
                 <motion.div
                   key={project.id}
                   initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
+                  animate={{ opacity: isDeleting ? 0.4 : 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
                   transition={{ delay: i * 0.05 }}
-                  className="bg-card border border-border rounded-xl overflow-hidden hover:border-primary/40 transition-all cursor-pointer group shadow-sm hover:shadow-md"
+                  className="bg-card border border-border rounded-xl overflow-hidden hover:border-primary/40 transition-all cursor-pointer group shadow-sm hover:shadow-md relative"
                   onClick={() => {
+                    if (isDeleting) return;
                     if (status === "ready") {
                       setLocation(`/play/${project.id}`);
                     } else if (status === "generating") {
@@ -158,9 +265,18 @@ export default function Dashboard() {
                           ? formatDistanceToNow(new Date(project.createdAt), { addSuffix: true })
                           : ""}
                       </p>
-                      <span className="text-[11px] text-primary font-medium group-hover:underline">
-                        {status === "ready" ? "Play →" : status === "generating" ? "View progress →" : "Continue →"}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] text-primary font-medium group-hover:underline">
+                          {status === "ready" ? "Play →" : status === "generating" ? "View progress →" : "Continue →"}
+                        </span>
+                        {!isDeleting && (
+                          <ProjectMenu
+                            projectId={project.id}
+                            onDelete={() => setConfirmDelete({ id: project.id, title })}
+                          />
+                        )}
+                        {isDeleting && <Spinner className="w-4 h-4" />}
+                      </div>
                     </div>
                   </div>
                 </motion.div>
