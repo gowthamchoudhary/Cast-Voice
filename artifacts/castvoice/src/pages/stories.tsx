@@ -17,24 +17,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-
-function Nav() {
-  const [, setLocation] = useLocation();
-  return (
-    <header className="border-b border-border bg-background/80 backdrop-blur-sm sticky top-0 z-40">
-      <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
-        <button onClick={() => setLocation("/dashboard")} className="font-serif text-xl font-bold text-foreground">
-          Cast<span className="text-primary">Voice</span>
-        </button>
-        <nav className="hidden sm:flex items-center gap-6 text-sm text-muted-foreground">
-          <button onClick={() => setLocation("/dashboard")} className="hover:text-foreground transition-colors">Dashboard</button>
-          <button onClick={() => setLocation("/stories")} className="text-foreground font-medium">Stories</button>
-          <button onClick={() => setLocation("/settings")} className="hover:text-foreground transition-colors">Settings</button>
-        </nav>
-      </div>
-    </header>
-  );
-}
+import { AppNav } from "@/components/app-nav";
 
 type Story = {
   id: number;
@@ -106,7 +89,7 @@ export default function Stories() {
 
   return (
     <div className="min-h-screen bg-background">
-      <Nav />
+      <AppNav current="stories" />
       <main className="max-w-6xl mx-auto px-6 py-10">
         {/* Tabs */}
         <div className="flex items-center gap-4 mb-8">

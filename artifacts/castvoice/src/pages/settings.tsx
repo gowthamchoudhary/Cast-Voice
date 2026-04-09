@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AnimatePresence, motion } from "framer-motion";
+import { AppNav } from "@/components/app-nav";
 
 type VoiceLibraryEntry = {
   id: number;
@@ -30,24 +31,6 @@ type VoiceLibraryEntry = {
   inviteUuid: string | null;
   createdAt: string;
 };
-
-function Nav() {
-  const [, setLocation] = useLocation();
-  return (
-    <header className="border-b border-border bg-background/80 backdrop-blur-sm sticky top-0 z-40">
-      <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
-        <button onClick={() => setLocation("/dashboard")} className="font-serif text-xl font-bold text-foreground">
-          Cast<span className="text-primary">Voice</span>
-        </button>
-        <nav className="hidden sm:flex items-center gap-6 text-sm text-muted-foreground">
-          <button onClick={() => setLocation("/dashboard")} className="hover:text-foreground transition-colors">Dashboard</button>
-          <button onClick={() => setLocation("/stories")} className="hover:text-foreground transition-colors">Stories</button>
-          <button onClick={() => setLocation("/settings")} className="text-foreground font-medium">Settings</button>
-        </nav>
-      </div>
-    </header>
-  );
-}
 
 function VoiceCard({ entry, onDelete }: { entry: VoiceLibraryEntry; onDelete: (id: number) => void }) {
   const [playing, setPlaying] = useState(false);
@@ -467,7 +450,7 @@ export default function Settings() {
 
   return (
     <div className="min-h-screen bg-background">
-      <Nav />
+      <AppNav current="settings" />
       <main className="max-w-2xl mx-auto px-6 py-10">
         <h1 className="font-serif text-3xl font-bold text-foreground mb-8">Settings</h1>
 

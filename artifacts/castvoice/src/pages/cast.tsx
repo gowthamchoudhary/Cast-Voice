@@ -17,24 +17,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-
-function Nav() {
-  const [, setLocation] = useLocation();
-  return (
-    <header className="border-b border-white/[0.06] bg-[#080808]/90 backdrop-blur-md sticky top-0 z-40">
-      <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
-        <button onClick={() => setLocation("/dashboard")} className="font-serif text-xl font-bold text-[#f0e6d0]">
-          Cast<span className="text-amber-400">Voice</span>
-        </button>
-        <nav className="hidden sm:flex items-center gap-7 text-sm text-[#e8dcc8]/40">
-          <button onClick={() => setLocation("/dashboard")} className="hover:text-[#e8dcc8] transition-colors">Dashboard</button>
-          <button onClick={() => setLocation("/stories")} className="hover:text-[#e8dcc8] transition-colors">Stories</button>
-          <button onClick={() => setLocation("/settings")} className="hover:text-[#e8dcc8] transition-colors">Settings</button>
-        </nav>
-      </div>
-    </header>
-  );
-}
+import { AppNav } from "@/components/app-nav";
 
 type Character = { id: string; name: string; description: string };
 type VoiceType = "ai_designed" | "user_clone" | "invite" | "library";
@@ -647,7 +630,7 @@ export default function Cast({ projectId }: { projectId: string }) {
 
   return (
     <div className="min-h-screen bg-background">
-      <Nav />
+      <AppNav current="other" showUser={false} />
       <main className="max-w-6xl mx-auto px-6 py-10">
         <div className="flex items-start gap-6 mb-10">
           {project?.story?.sceneImageUrl && (
