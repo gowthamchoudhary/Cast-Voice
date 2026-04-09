@@ -168,7 +168,16 @@
   }
 }
 
+@keyframes marquee {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+
 @layer utilities {
+  .animate-marquee {
+    animation: marquee 30s linear infinite;
+  }
+
   input[type="search"]::-webkit-search-cancel-button {
     @apply hidden;
   }
